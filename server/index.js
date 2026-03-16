@@ -90,6 +90,11 @@ io.use((socket, next) => {
 const activeRooms = new Map(); // roomId -> Set of { socketId, userId, userName, role }
 const waitingRooms = new Map(); // roomId -> Set of { socketId, userId, userName, role }
 
+// Proctor-event throttle: socketId -> Map<eventType, lastEmitTimestamp>
+// Prevents a flooding client from overwhelming the recruiter's UI.
+const PROCTOR_THROTTLE_MS = 3000;
+const proctorThrottles = new Map();
+
 io.on('connection', (socket) => {
   console.log(`[Socket.IO] User connected: ${socket.userName} (${socket.userId})`);
 
@@ -303,6 +308,38 @@ io.on('connection', (socket) => {
     io.to(targetSocketId).emit('editor-state-sync', { code, language });
   });
 
+  // --- Real-Time Proctoring Event Relay ---
+  // Candidates emit these; we broadcast to the rest of the room (recruiter)
+  socket.on('proctor-event', (eventData) => {
+    const interviewId = socket.currentRoom;
+    if (!interviewId) {
+      console.log(`[Socket.IO][Proctor] Ignored proctor-event from ${socket.userName} — not in a room`);
+      return;
+    }
+
+    // Rate-limit per socket per event type
+    const evType = eventData.type || 'unknown';
+    if (!proctorThrottles.has(socket.id)) {
+      proctorThrottles.set(socket.id, new Map());
+    }
+    const socketThrottles = proctorThrottles.get(socket.id);
+    const lastEmit = socketThrottles.get(evType) || 0;
+    const now = Date.now();
+    if (now - lastEmit < PROCTOR_THROTTLE_MS) {
+      console.log(`[Socket.IO][Proctor] THROTTLED: ${socket.userName} fired ${evType} too fast (${now - lastEmit}ms since last). Skipping relay.`);
+      return;
+    }
+    socketThrottles.set(evType, now);
+
+    console.log(`[Socket.IO][Proctor] ✅ Relaying: ${socket.userName} fired: ${evType} — "${eventData.detail}" → room: ${interviewId}`);
+    // Broadcast to everyone else in the room (i.e., the recruiter/interviewer)
+    socket.to(interviewId).emit('proctor-event', {
+      ...eventData,
+      candidateName: socket.userName,
+      candidateId: socket.userId,
+    });
+  });
+
   // --- Kick Participant (Recruiter Only) ---
   socket.on('kick-user', ({ targetSocketId }) => {
     if (!targetSocketId) return;
@@ -351,6 +388,9 @@ io.on('connection', (socket) => {
         userName: socket.userName,
       });
     }
+
+    // Clean up proctor throttle map for this socket
+    proctorThrottles.delete(socket.id);
   });
 });
 
