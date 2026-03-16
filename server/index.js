@@ -14,6 +14,7 @@ const jobRoutes = require('./routes/jobRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const stripeRoutes = require('./routes/stripeRoutes');
 const applicationRoutes = require('./routes/applicationRoutes');
+const organizationRoutes = require('./routes/organizationRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -54,6 +55,7 @@ app.use('/api/jobs', jobRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', stripeRoutes);
 app.use('/api/applications', applicationRoutes);
+app.use('/api/organization', organizationRoutes);
 
 app.get('/', (req, res) => {
   res.send('API is running...');

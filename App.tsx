@@ -6,6 +6,7 @@ import { ThemeProvider } from './components/ThemeContext';
 import { HomePage, AuthPage } from './pages/Public';
 import { AdminOverview, AdminUsers, AdminJobs, AdminApprovals } from './pages/Admin';
 import { OrgAdminDashboard, OrgSettings } from './pages/OrgAdmin';
+import { OrgTeam } from './pages/OrgTeam';
 import { RecruiterDashboard, CreateJob, MyJobs, Applicants, RecruiterProfile, FindInterviewers, RecruiterInterviews } from './pages/Recruiter';
 import { RankedCandidates } from './pages/RankedCandidates';
 import { CandidateDashboard, CandidateJobs, CandidateProfile, CandidateInterviews, CandidateApplications } from './pages/Candidate';
@@ -40,6 +41,7 @@ const App: React.FC = () => {
           <Route path="/organization" element={<DashboardLayout role="organization" />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<OrgAdminDashboard />} />
+            <Route path="team" element={<OrgTeam />} />
             <Route path="settings" element={<OrgSettings />} />
             <Route path="*" element={<Navigate to="/organization/dashboard" replace />} />
           </Route>
