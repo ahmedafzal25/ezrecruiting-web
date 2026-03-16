@@ -63,6 +63,17 @@ interface ProctoringConfig {
     roomId?: string;
 }
 
+interface UseProctoringProps {
+    interviewId: string;
+    videoRef: React.RefObject<HTMLVideoElement | null>;
+    editorContainerRef: React.RefObject<HTMLDivElement | null>;
+    enabled: boolean;
+    isVideoOff?: boolean; // If true, pauses frame capture
+    captureIntervalMs?: number;
+    socketRef: React.RefObject<Socket | null>;
+    roomId: string;
+}
+
 /** Return value from the useProctoring hook. */
 interface ProctoringReturn {
     /** Accumulated proctoring events. */
@@ -107,13 +118,14 @@ const GAZE_SUSTAINED_MS = 3000;
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useProctoring(config: ProctoringConfig): ProctoringReturn {
+export function useProctoring(config: UseProctoringProps): ProctoringReturn {
     const {
         interviewId,
         videoRef,
         editorContainerRef,
         enabled,
-        captureIntervalMs = 500,
+        isVideoOff = false,
+        captureIntervalMs = 1000,
         socketRef: ioSocketRef,
         roomId,
     } = config;
@@ -241,6 +253,9 @@ export function useProctoring(config: ProctoringConfig): ProctoringReturn {
 
     // ── Frame capture: grab JPEG from <video> and send to Python ─────
     const captureAndSend = useCallback(() => {
+        // Pause capture if video is intentionally muted
+        if (isVideoOff) return;
+
         const video = videoRef.current;
         const ws = wsRef.current;
 
@@ -266,7 +281,7 @@ export function useProctoring(config: ProctoringConfig): ProctoringReturn {
         if (base64) {
             ws.send(JSON.stringify({ type: 'frame', data: base64 }));
         }
-    }, [videoRef]);
+    }, [videoRef, isVideoOff]);
 
     // ── Start / stop frame capture interval ──────────────────────────
     const startCapture = useCallback(() => {
