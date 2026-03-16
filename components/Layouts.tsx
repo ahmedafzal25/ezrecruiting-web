@@ -207,7 +207,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
 
   const orgAdminLinks: SidebarItem[] = [
     { name: 'Dashboard', path: '/organization/dashboard', icon: LayoutDashboard },
-    { name: 'Manage Team', path: '/organization/dashboard', icon: Users },
+    { name: 'Team', path: '/organization/team', icon: Users },
     { name: 'Settings', path: '/organization/settings', icon: Settings },
   ];
 
