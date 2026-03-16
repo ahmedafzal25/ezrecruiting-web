@@ -4,7 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import Editor from '@monaco-editor/react';
 import {
     Mic, MicOff, Video, VideoOff, PhoneOff,
-    Monitor, Code, Users, Maximize2, Minimize2, UserX, AlertTriangle, Eye, ShieldAlert
+    Monitor, Code, Users, Maximize2, Minimize2, UserX, Eye, ShieldAlert
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { apiRequest } from '../utils/api';
@@ -166,7 +166,12 @@ const InterviewRoom: React.FC = () => {
     const [isEditorFocused, setIsEditorFocused] = useState(false);
 
     // Proctoring alert state (recruiter side)
-    const [proctorAlerts, setProctorAlerts] = useState<Array<ProctoringEvent & { candidateName?: string }>>([]);
+    const [proctorAlerts, setProctorAlerts] = useState<Array<ProctoringEvent & { candidateName?: string }>>([])
+    const [isAlertDropdownOpen, setIsAlertDropdownOpen] = useState(false);
+    const alertDropdownRef = useRef<HTMLDivElement>(null);
+    // Mirror ref so the socket closure can read the latest value
+    const alertDropdownOpenRef = useRef(false);
+    useEffect(() => { alertDropdownOpenRef.current = isAlertDropdownOpen; }, [isAlertDropdownOpen]);;
 
     // Code editor state
     const [code, setCode] = useState<string>('// Welcome to the Procruit Interview Sandbox\n// Write your code here...\n\nfunction solution() {\n  \n}\n');
@@ -216,6 +221,19 @@ const InterviewRoom: React.FC = () => {
         socketRef: socketRef as React.RefObject<Socket | null>,
         roomId: interview?.meetingId || '',
     });
+
+    // Click-outside to close alert dropdown
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (alertDropdownRef.current && !alertDropdownRef.current.contains(e.target as Node)) {
+                setIsAlertDropdownOpen(false);
+            }
+        };
+        if (isAlertDropdownOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isAlertDropdownOpen]);
 
     // ===========================
     // Fetch Interview Details
@@ -560,14 +578,16 @@ const InterviewRoom: React.FC = () => {
 
                     setProctorAlerts(prev => [...prev, alert]);
 
-                    // Show a toast notification for the recruiter
-                    const icon = eventData.type === 'tab_switch' ? '🔀'
-                        : eventData.type === 'copy' ? '📋'
-                        : eventData.type === 'paste' ? '📌'
-                        : eventData.type === 'face_lost' ? '👤'
-                        : eventData.type === 'gaze' ? '👁️' : '⚠️';
+                    // Show a toast notification ONLY if the alert dropdown is closed
+                    if (!alertDropdownOpenRef.current) {
+                        const icon = eventData.type === 'tab_switch' ? '🔀'
+                            : eventData.type === 'copy' ? '📋'
+                                : eventData.type === 'paste' ? '📌'
+                                    : eventData.type === 'face_lost' ? '👤'
+                                        : eventData.type === 'gaze' ? '👁️' : '⚠️';
 
-                    addToast('warning', `${icon} Proctor Alert: ${eventData.candidateName || 'Candidate'} — ${eventData.detail}`);
+                        addToast('warning', `${icon} Proctor Alert: ${eventData.candidateName || 'Candidate'} — ${eventData.detail}`);
+                    }
                 } catch (err) {
                     console.error('[InterviewRoom] Error processing proctor-event:', err);
                 }
@@ -944,11 +964,62 @@ const InterviewRoom: React.FC = () => {
                     </div>
                 )}
 
-                {/* Proctoring alert count badge — Recruiter only */}
+                {/* Proctoring alert dropdown — Recruiter only */}
                 {isRecruiter && proctorAlerts.length > 0 && (
-                    <div className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-full cursor-pointer" title={`${proctorAlerts.length} proctoring alert(s) detected`}>
-                        <ShieldAlert size={13} className="text-amber-400" />
-                        <span className="text-xs font-semibold text-amber-400">{proctorAlerts.length} Alert{proctorAlerts.length !== 1 ? 's' : ''}</span>
+                    <div className="relative" ref={alertDropdownRef}>
+                        <button
+                            onClick={() => setIsAlertDropdownOpen(prev => !prev)}
+                            className={`flex items-center gap-2 px-3 py-1 rounded-full cursor-pointer transition-all duration-200 ${isAlertDropdownOpen
+                                    ? 'bg-amber-500/20 border border-amber-500/50 ring-1 ring-amber-500/30'
+                                    : 'bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/15'
+                                }`}
+                            title={`${proctorAlerts.length} proctoring alert(s) — click to ${isAlertDropdownOpen ? 'close' : 'view'}`}
+                        >
+                            <ShieldAlert size={13} className="text-amber-400" />
+                            <span className="text-xs font-semibold text-amber-400">
+                                {proctorAlerts.length} Alert{proctorAlerts.length !== 1 ? 's' : ''}
+                            </span>
+                        </button>
+
+                        {/* Dropdown panel */}
+                        {isAlertDropdownOpen && (
+                            <div className="absolute right-0 top-full mt-2 w-96 max-h-80 overflow-y-auto bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl backdrop-blur-md z-[10000]">
+                                {/* Header */}
+                                <div className="sticky top-0 bg-neutral-900/95 backdrop-blur-md px-4 py-3 border-b border-neutral-800 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <ShieldAlert size={14} className="text-amber-400" />
+                                        <span className="text-sm font-semibold text-white">Proctoring Alerts</span>
+                                    </div>
+                                    <span className="text-[11px] text-neutral-500">{proctorAlerts.length} total</span>
+                                </div>
+
+                                {/* Alert list */}
+                                <div className="px-2 py-2 flex flex-col gap-1.5">
+                                    {[...proctorAlerts].reverse().map((alert, i) => {
+                                        const icon = alert.type === 'tab_switch' ? '🔀'
+                                            : alert.type === 'copy' ? '📋'
+                                                : alert.type === 'paste' ? '📌'
+                                                    : alert.type === 'face_lost' ? '👤'
+                                                        : alert.type === 'gaze' ? '👁️' : '⚠️';
+                                        return (
+                                            <div key={i} className="flex items-start gap-2.5 px-3 py-2 rounded-lg hover:bg-neutral-800/60 transition-colors">
+                                                <span className="text-sm mt-0.5 flex-shrink-0">{icon}</span>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-xs font-semibold text-amber-300">{alert.candidateName || 'Candidate'}</p>
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 font-medium">
+                                                            {alert.type.replace('_', ' ')}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[11px] text-neutral-300 mt-0.5">{alert.detail}</p>
+                                                    <p className="text-[10px] text-neutral-500 mt-0.5">{new Date(alert.timestamp).toLocaleTimeString()}</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </header>
@@ -988,21 +1059,7 @@ const InterviewRoom: React.FC = () => {
                     </div>
                 )}
 
-                {/* Proctoring Alerts Panel — Recruiter Only (top-left, below admission overlays) */}
-                {isRecruiter && proctorAlerts.length > 0 && (
-                    <div className="absolute bottom-20 left-4 z-40 flex flex-col gap-2 max-h-[220px] overflow-y-auto" style={{ maxWidth: 340 }}>
-                        {proctorAlerts.slice(-5).map((alert, i) => (
-                            <div key={i} className="flex items-start gap-2.5 bg-amber-950/80 border border-amber-500/30 backdrop-blur-sm px-3 py-2 rounded-lg shadow-lg animate-in fade-in slide-in-from-left-2">
-                                <AlertTriangle size={14} className="text-amber-400 mt-0.5 flex-shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-semibold text-amber-300">{alert.candidateName || 'Candidate'}</p>
-                                    <p className="text-[11px] text-amber-200/80 truncate">{alert.detail}</p>
-                                    <p className="text-[10px] text-amber-500/60 mt-0.5">{new Date(alert.timestamp).toLocaleTimeString()}</p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+
 
                 {/* Left Side: Code Editor */}
                 <div ref={editorContainerRef} className={`flex flex-col transition-all duration-300 ${isEditorFocused ? 'flex-[3]' : 'flex-[2]'}`}>
