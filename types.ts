@@ -89,6 +89,11 @@ export interface Interview {
   status: 'Pending' | 'Accepted' | 'Rejected' | 'Scheduled' | 'InProgress' | 'Completed' | 'Cancelled';
   paymentStatus?: 'Unpaid' | 'Paid';
   notes?: string;
+  proctorLog?: Array<{
+    type: 'tab_switch' | 'copy' | 'paste' | 'gaze' | 'face_lost';
+    detail: string;
+    timestamp: string;
+  }>;
   // Legacy compat
   date?: string;
   time?: string;

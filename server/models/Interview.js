@@ -19,6 +19,11 @@ const interviewSchema = new mongoose.Schema({
     default: 'Unpaid'
   },
   notes: { type: String, default: '' },
+  proctorLog: [{
+    type: { type: String, enum: ['tab_switch', 'copy', 'paste', 'gaze', 'face_lost'] },
+    detail: String,
+    timestamp: Date,
+  }],
   createdAt: { type: Date, default: Date.now }
 });
 

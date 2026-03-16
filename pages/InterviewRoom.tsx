@@ -4,10 +4,11 @@ import { io, Socket } from 'socket.io-client';
 import Editor from '@monaco-editor/react';
 import {
     Mic, MicOff, Video, VideoOff, PhoneOff,
-    Monitor, Code, Users, Maximize2, Minimize2, UserX
+    Monitor, Code, Users, Maximize2, Minimize2, UserX, AlertTriangle, Eye, ShieldAlert
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { apiRequest } from '../utils/api';
+import { useProctoring, type ProctoringEvent } from '../hooks/useProctoring';
 
 // ICE servers for WebRTC
 const ICE_SERVERS: RTCConfiguration = {
@@ -164,6 +165,9 @@ const InterviewRoom: React.FC = () => {
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const [isEditorFocused, setIsEditorFocused] = useState(false);
 
+    // Proctoring alert state (recruiter side)
+    const [proctorAlerts, setProctorAlerts] = useState<Array<ProctoringEvent & { candidateName?: string }>>([]);
+
     // Code editor state
     const [code, setCode] = useState<string>('// Welcome to the Procruit Interview Sandbox\n// Write your code here...\n\nfunction solution() {\n  \n}\n');
     const [editorLanguage, setEditorLanguage] = useState('javascript');
@@ -179,6 +183,8 @@ const InterviewRoom: React.FC = () => {
     const localStreamRef = useRef<MediaStream | null>(null);
     const screenStreamRef = useRef<MediaStream | null>(null);
     const isInitiatorRef = useRef(false);
+    // Editor container ref for proctoring copy/paste detection
+    const editorContainerRef = useRef<HTMLDivElement>(null);
     // Remote video elements — keyed by socketId
     const remoteVideoRefs = useRef<Map<string, HTMLVideoElement | null>>(new Map());
     // Mirror refs so socket closures always read current code/language
@@ -197,6 +203,19 @@ const InterviewRoom: React.FC = () => {
     const userString = localStorage.getItem('user');
     const user = userString ? JSON.parse(userString) : null;
     const isRecruiter = user?.role === 'RECRUITER' || user?.role === 'recruiter' || user?.role === 'organization';
+
+    // ===========================
+    // Proctoring Hook (Candidate only)
+    // ===========================
+    const { events: proctoringEvents, isConnected: proctorWsConnected, flushLogs } = useProctoring({
+        interviewId: interview?._id || '',
+        videoRef: localVideoRef,
+        editorContainerRef,
+        enabled: !isRecruiter && !!interview,
+        captureIntervalMs: 500,
+        socketRef: socketRef as React.RefObject<Socket | null>,
+        roomId: interview?.meetingId || '',
+    });
 
     // ===========================
     // Fetch Interview Details
@@ -525,6 +544,36 @@ const InterviewRoom: React.FC = () => {
             });
 
             // ==============================
+            // Real-Time Proctoring Alerts (Recruiter receives these)
+            // ==============================
+            socket.on('proctor-event', (eventData: any) => {
+                if (!isMounted) return;
+                try {
+                    console.log('[InterviewRoom] Recruiter received proctor-event:', eventData);
+
+                    const alert = {
+                        type: eventData.type,
+                        detail: eventData.detail,
+                        timestamp: eventData.timestamp,
+                        candidateName: eventData.candidateName,
+                    } as ProctoringEvent & { candidateName?: string };
+
+                    setProctorAlerts(prev => [...prev, alert]);
+
+                    // Show a toast notification for the recruiter
+                    const icon = eventData.type === 'tab_switch' ? '🔀'
+                        : eventData.type === 'copy' ? '📋'
+                        : eventData.type === 'paste' ? '📌'
+                        : eventData.type === 'face_lost' ? '👤'
+                        : eventData.type === 'gaze' ? '👁️' : '⚠️';
+
+                    addToast('warning', `${icon} Proctor Alert: ${eventData.candidateName || 'Candidate'} — ${eventData.detail}`);
+                } catch (err) {
+                    console.error('[InterviewRoom] Error processing proctor-event:', err);
+                }
+            });
+
+            // ==============================
             // Kicked from room (target user)
             // ==============================
             socket.on('kicked-from-room', () => {
@@ -676,7 +725,18 @@ const InterviewRoom: React.FC = () => {
         }
     };
 
-    const endCall = () => {
+    const endCall = async () => {
+        // Flush proctoring logs to the backend before disconnecting
+        if (!isRecruiter && interview?._id) {
+            console.log('[InterviewRoom] Flushing proctoring logs before leaving...');
+            try {
+                await flushLogs();
+                console.log('[InterviewRoom] Proctoring logs flushed successfully.');
+            } catch (err) {
+                console.error('[InterviewRoom] Failed to flush proctoring logs:', err);
+            }
+        }
+
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach((t) => t.stop());
         }
@@ -867,6 +927,30 @@ const InterviewRoom: React.FC = () => {
                         </div>
                     )}
                 </div>
+
+                {/* Proctoring status indicator — Candidate only */}
+                {!isRecruiter && interview && (
+                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${proctorWsConnected
+                        ? 'bg-emerald-500/10 border border-emerald-500/20'
+                        : 'bg-amber-500/10 border border-amber-500/20'
+                        }`}
+                        title={proctorWsConnected ? 'AI proctoring is active — gaze, tab-switch, and copy/paste are being monitored' : 'AI proctoring is connecting...'}
+                    >
+                        <Eye size={13} className={proctorWsConnected ? 'text-emerald-400' : 'text-amber-400'} />
+                        <span className={`text-xs font-medium ${proctorWsConnected ? 'text-emerald-400' : 'text-amber-400'}`}>
+                            AI Monitor {proctorWsConnected ? 'Active' : 'Connecting…'}
+                        </span>
+                        <div className={`w-1.5 h-1.5 rounded-full ${proctorWsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                    </div>
+                )}
+
+                {/* Proctoring alert count badge — Recruiter only */}
+                {isRecruiter && proctorAlerts.length > 0 && (
+                    <div className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-full cursor-pointer" title={`${proctorAlerts.length} proctoring alert(s) detected`}>
+                        <ShieldAlert size={13} className="text-amber-400" />
+                        <span className="text-xs font-semibold text-amber-400">{proctorAlerts.length} Alert{proctorAlerts.length !== 1 ? 's' : ''}</span>
+                    </div>
+                )}
             </header>
 
             {/* Main Content — Split View */}
@@ -904,8 +988,24 @@ const InterviewRoom: React.FC = () => {
                     </div>
                 )}
 
+                {/* Proctoring Alerts Panel — Recruiter Only (top-left, below admission overlays) */}
+                {isRecruiter && proctorAlerts.length > 0 && (
+                    <div className="absolute bottom-20 left-4 z-40 flex flex-col gap-2 max-h-[220px] overflow-y-auto" style={{ maxWidth: 340 }}>
+                        {proctorAlerts.slice(-5).map((alert, i) => (
+                            <div key={i} className="flex items-start gap-2.5 bg-amber-950/80 border border-amber-500/30 backdrop-blur-sm px-3 py-2 rounded-lg shadow-lg animate-in fade-in slide-in-from-left-2">
+                                <AlertTriangle size={14} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-semibold text-amber-300">{alert.candidateName || 'Candidate'}</p>
+                                    <p className="text-[11px] text-amber-200/80 truncate">{alert.detail}</p>
+                                    <p className="text-[10px] text-amber-500/60 mt-0.5">{new Date(alert.timestamp).toLocaleTimeString()}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
                 {/* Left Side: Code Editor */}
-                <div className={`flex flex-col transition-all duration-300 ${isEditorFocused ? 'flex-[3]' : 'flex-[2]'}`}>
+                <div ref={editorContainerRef} className={`flex flex-col transition-all duration-300 ${isEditorFocused ? 'flex-[3]' : 'flex-[2]'}`}>
                     {/* Editor Header */}
                     <div className="h-10 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4">
                         <div className="flex items-center gap-2">
