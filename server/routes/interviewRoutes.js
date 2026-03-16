@@ -219,4 +219,88 @@ router.get('/my-messages', protect, async (req, res) => {
 });
 
 
+// ============================
+// Proctor Log — Retrieve proctoring events (Recruiter / Admin)
+// ============================
+router.get('/:id/proctor-log', protect, async (req, res) => {
+    try {
+        console.log(`[Proctor-Log] GET request for interview ${req.params.id} by user ${req.user._id}`);
+
+        const interview = await Interview.findById(req.params.id)
+            .populate('candidateId', 'name email')
+            .populate('recruiterId', 'name email');
+
+        if (!interview) {
+            return res.status(404).json({ message: 'Interview not found' });
+        }
+
+        // Only recruiter, interviewer, or admin may view the proctor log
+        const userId = req.user._id.toString();
+        const isRecruiter = interview.recruiterId?._id?.toString() === userId;
+        const isInterviewer = interview.interviewerId?.toString() === userId;
+        const isAdmin = req.user.role === 'ADMIN';
+
+        if (!isRecruiter && !isInterviewer && !isAdmin) {
+            return res.status(403).json({ message: 'Only the recruiter, interviewer, or admin may view proctor logs' });
+        }
+
+        console.log(`[Proctor-Log] Returning ${interview.proctorLog?.length || 0} events for interview ${req.params.id}`);
+        res.json({
+            interviewId: interview._id,
+            candidateName: interview.candidateId?.name || 'Unknown',
+            totalEvents: interview.proctorLog?.length || 0,
+            events: interview.proctorLog || [],
+        });
+    } catch (err) {
+        console.error('[Proctor-Log] Error retrieving proctor log:', err);
+        res.status(500).json({ message: 'Failed to retrieve proctor log' });
+    }
+});
+
+// ============================
+// Proctor Log — Persist proctoring events
+// ============================
+router.post('/:id/proctor-log', protect, async (req, res) => {
+    try {
+        const { events } = req.body;
+        if (!Array.isArray(events) || events.length === 0) {
+            return res.status(400).json({ message: 'No events provided' });
+        }
+
+        console.log(`[Proctor-Log] Received ${events.length} events for interview ${req.params.id}`);
+
+        const interview = await Interview.findById(req.params.id);
+        if (!interview) {
+            return res.status(404).json({ message: 'Interview not found' });
+        }
+
+        // Validate user is a participant
+        const userId = req.user._id.toString();
+        const isParticipant =
+            interview.recruiterId.toString() === userId ||
+            interview.candidateId.toString() === userId ||
+            (interview.interviewerId && interview.interviewerId.toString() === userId);
+
+        if (!isParticipant && req.user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Not authorized for this interview' });
+        }
+
+        // Map and push events
+        const mappedEvents = events.map(e => ({
+            type: e.type,
+            detail: e.detail,
+            timestamp: new Date(e.timestamp),
+        }));
+
+        interview.proctorLog.push(...mappedEvents);
+        await interview.save();
+
+        console.log(`[Proctor-Log] Saved ${mappedEvents.length} events. Total: ${interview.proctorLog.length}`);
+        res.json({ saved: mappedEvents.length, total: interview.proctorLog.length });
+    } catch (err) {
+        console.error('[Proctor-Log] Error saving proctor log:', err);
+        res.status(500).json({ message: 'Failed to save proctor log' });
+    }
+});
+
 module.exports = router;

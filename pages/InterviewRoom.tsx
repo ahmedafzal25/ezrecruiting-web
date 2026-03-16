@@ -4,10 +4,11 @@ import { io, Socket } from 'socket.io-client';
 import Editor from '@monaco-editor/react';
 import {
     Mic, MicOff, Video, VideoOff, PhoneOff,
-    Monitor, Code, Users, Maximize2, Minimize2, UserX
+    Monitor, Code, Users, Maximize2, Minimize2, UserX, Eye, ShieldAlert
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { apiRequest } from '../utils/api';
+import { useProctoring, type ProctoringEvent } from '../hooks/useProctoring';
 
 // ICE servers for WebRTC
 const ICE_SERVERS: RTCConfiguration = {
@@ -46,9 +47,10 @@ interface InterviewData {
 const VIDEO_GRID_STYLES = `
   .video-grid {
     display: grid;
-    gap: 10px;
-    padding: 10px;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    padding: 24px;
+    padding-bottom: 90px; /* Space for floating control bar */
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     height: 100%;
     width: 100%;
     align-content: center;
@@ -57,16 +59,18 @@ const VIDEO_GRID_STYLES = `
   }
   .video-tile {
     position: relative;
-    border-radius: 10px;
+    border-radius: 16px;
     overflow: hidden;
     background: #111827;
-    min-height: 160px;
-    max-height: 40vh;
-    border: 1px solid rgba(255,255,255,0.07);
-    transition: box-shadow 0.2s;
+    min-height: 200px;
+    max-height: 45vh;
+    border: 1px solid rgba(255,255,255,0.05);
+    transition: box-shadow 0.3s ease, transform 0.3s ease;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
   }
   .video-tile:hover {
-    box-shadow: 0 0 0 2px rgba(123, 44, 191, 0.4);
+    box-shadow: 0 8px 30px rgba(123, 44, 191, 0.3);
+    transform: translateY(-2px);
   }
   .video-tile video {
     width: 100%;
@@ -76,30 +80,32 @@ const VIDEO_GRID_STYLES = `
   }
   .video-tile .video-label {
     position: absolute;
-    bottom: 8px;
-    left: 8px;
-    background: rgba(0,0,0,0.65);
-    backdrop-filter: blur(6px);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(17, 24, 39, 0.7);
+    backdrop-filter: blur(8px);
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
     color: #fff;
     pointer-events: none;
+    border: 1px solid rgba(255,255,255,0.1);
   }
   .video-tile .kick-btn {
     position: absolute;
-    top: 8px;
-    right: 8px;
+    top: 12px;
+    right: 12px;
     background: rgba(239, 68, 68, 0.85);
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     color: #fff;
-    padding: 5px 7px;
+    padding: 6px 10px;
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     opacity: 0;
     transition: opacity 0.2s, background 0.2s;
@@ -164,6 +170,18 @@ const InterviewRoom: React.FC = () => {
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const [isEditorFocused, setIsEditorFocused] = useState(false);
 
+    // Proctoring alert state (recruiter side)
+    const [proctorAlerts, setProctorAlerts] = useState<Array<ProctoringEvent & { candidateName?: string }>>([])
+    const [isAlertDropdownOpen, setIsAlertDropdownOpen] = useState(false);
+    const alertDropdownRef = useRef<HTMLDivElement>(null);
+    // Mirror ref so the socket closure can read the latest value
+    const alertDropdownOpenRef = useRef(false);
+    useEffect(() => { alertDropdownOpenRef.current = isAlertDropdownOpen; }, [isAlertDropdownOpen]);
+
+    // Participant dropdown state
+    const [isParticipantDropdownOpen, setIsParticipantDropdownOpen] = useState(false);
+    const participantDropdownRef = useRef<HTMLDivElement>(null);
+
     // Code editor state
     const [code, setCode] = useState<string>('// Welcome to the Procruit Interview Sandbox\n// Write your code here...\n\nfunction solution() {\n  \n}\n');
     const [editorLanguage, setEditorLanguage] = useState('javascript');
@@ -179,6 +197,8 @@ const InterviewRoom: React.FC = () => {
     const localStreamRef = useRef<MediaStream | null>(null);
     const screenStreamRef = useRef<MediaStream | null>(null);
     const isInitiatorRef = useRef(false);
+    // Editor container ref for proctoring copy/paste detection
+    const editorContainerRef = useRef<HTMLDivElement>(null);
     // Remote video elements — keyed by socketId
     const remoteVideoRefs = useRef<Map<string, HTMLVideoElement | null>>(new Map());
     // Mirror refs so socket closures always read current code/language
@@ -197,6 +217,36 @@ const InterviewRoom: React.FC = () => {
     const userString = localStorage.getItem('user');
     const user = userString ? JSON.parse(userString) : null;
     const isRecruiter = user?.role === 'RECRUITER' || user?.role === 'recruiter' || user?.role === 'organization';
+
+    // ===========================
+    // Proctoring Hook (Candidate only)
+    // ===========================
+    const { events: proctoringEvents, isConnected: proctorWsConnected, flushLogs } = useProctoring({
+        interviewId: interview?._id || '',
+        videoRef: localVideoRef,
+        editorContainerRef,
+        enabled: !isRecruiter && !!interview,
+        isVideoOff: isVideoOff,
+        captureIntervalMs: 500,
+        socketRef: socketRef as React.RefObject<Socket | null>,
+        roomId: interview?.meetingId || '',
+    });
+
+    // Click-outside to close alert dropdown and participant dropdown
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (alertDropdownRef.current && !alertDropdownRef.current.contains(e.target as Node)) {
+                setIsAlertDropdownOpen(false);
+            }
+            if (participantDropdownRef.current && !participantDropdownRef.current.contains(e.target as Node)) {
+                setIsParticipantDropdownOpen(false);
+            }
+        };
+        if (isAlertDropdownOpen || isParticipantDropdownOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isAlertDropdownOpen, isParticipantDropdownOpen]);
 
     // ===========================
     // Fetch Interview Details
@@ -525,6 +575,38 @@ const InterviewRoom: React.FC = () => {
             });
 
             // ==============================
+            // Real-Time Proctoring Alerts (Recruiter receives these)
+            // ==============================
+            socket.on('proctor-event', (eventData: any) => {
+                if (!isMounted) return;
+                try {
+                    console.log('[InterviewRoom] Recruiter received proctor-event:', eventData);
+
+                    const alert = {
+                        type: eventData.type,
+                        detail: eventData.detail,
+                        timestamp: eventData.timestamp,
+                        candidateName: eventData.candidateName,
+                    } as ProctoringEvent & { candidateName?: string };
+
+                    setProctorAlerts(prev => [...prev, alert]);
+
+                    // Show a toast notification ONLY if the alert dropdown is closed
+                    if (!alertDropdownOpenRef.current) {
+                        const icon = eventData.type === 'tab_switch' ? '🔀'
+                            : eventData.type === 'copy' ? '📋'
+                                : eventData.type === 'paste' ? '📌'
+                                    : eventData.type === 'face_lost' ? '👤'
+                                        : eventData.type === 'gaze' ? '👁️' : '⚠️';
+
+                        addToast('warning', `${icon} Proctor Alert: ${eventData.candidateName || 'Candidate'} — ${eventData.detail}`);
+                    }
+                } catch (err) {
+                    console.error('[InterviewRoom] Error processing proctor-event:', err);
+                }
+            });
+
+            // ==============================
             // Kicked from room (target user)
             // ==============================
             socket.on('kicked-from-room', () => {
@@ -676,7 +758,18 @@ const InterviewRoom: React.FC = () => {
         }
     };
 
-    const endCall = () => {
+    const endCall = async () => {
+        // Flush proctoring logs to the backend before disconnecting
+        if (!isRecruiter && interview?._id) {
+            console.log('[InterviewRoom] Flushing proctoring logs before leaving...');
+            try {
+                await flushLogs();
+                console.log('[InterviewRoom] Proctoring logs flushed successfully.');
+            } catch (err) {
+                console.error('[InterviewRoom] Failed to flush proctoring logs:', err);
+            }
+        }
+
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach((t) => t.stop());
         }
@@ -833,7 +926,7 @@ const InterviewRoom: React.FC = () => {
             <ToastContainer />
 
             {/* Top Bar */}
-            <header className="h-14 bg-neutral-900/80 border-b border-neutral-800 flex items-center justify-between px-4 flex-shrink-0 backdrop-blur-sm">
+            <header className="relative z-[100] h-14 bg-neutral-900/80 border-b border-neutral-800 flex items-center justify-between px-4 flex-shrink-0 backdrop-blur-sm">
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#7B2CBF] to-[#480CA8] flex items-center justify-center text-xs font-bold shadow-lg shadow-purple-500/20">
                         AI
@@ -848,11 +941,56 @@ const InterviewRoom: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 relative">
                     {/* Participant count */}
-                    <div className="flex items-center gap-2 px-3 py-1 bg-neutral-800 border border-neutral-700 rounded-full">
-                        <Users size={12} className="text-neutral-400" />
-                        <span className="text-xs text-neutral-400">{totalConnected} participant{totalConnected !== 1 ? 's' : ''}</span>
+                    <div className="relative" ref={participantDropdownRef}>
+                        <button
+                            onClick={() => setIsParticipantDropdownOpen(prev => !prev)}
+                            className={`flex items-center gap-2 px-3 py-1 rounded-full cursor-pointer transition-all duration-200 ${isParticipantDropdownOpen
+                                ? 'bg-neutral-700 border border-neutral-600 ring-1 ring-neutral-500/30'
+                                : 'bg-neutral-800 border border-neutral-700 hover:bg-neutral-700'
+                                }`}
+                            title="View Participants"
+                        >
+                            <Users size={12} className="text-neutral-400" />
+                            <span className="text-xs text-neutral-300">{totalConnected} participant{totalConnected !== 1 ? 's' : ''}</span>
+                        </button>
+
+                        {/* Participant Dropdown panel */}
+                        {isParticipantDropdownOpen && (
+                            <div className="absolute left-0 top-full mt-2 w-64 max-h-80 overflow-y-auto bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl backdrop-blur-md z-[10000]">
+                                {/* Header */}
+                                <div className="sticky top-0 bg-neutral-900/95 backdrop-blur-md px-4 py-3 border-b border-neutral-800 flex items-center justify-between">
+                                    <span className="text-sm font-semibold text-white">In this call</span>
+                                    <span className="text-[11px] text-neutral-500">{totalConnected}</span>
+                                </div>
+
+                                {/* Participant list */}
+                                <div className="px-2 py-2 flex flex-col gap-1.5">
+                                    <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-neutral-800/60 transition-colors">
+                                        <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center flex-shrink-0 border border-neutral-700">
+                                            <Users size={14} className="text-neutral-400" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <p className="text-sm font-medium text-white truncate">{user?.name || 'You'}</p>
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 font-medium">YOU</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {remoteStreams.map((rs, i) => (
+                                        <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-neutral-800/60 transition-colors">
+                                            <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center flex-shrink-0 border border-neutral-700">
+                                                <Users size={14} className="text-neutral-400" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-neutral-300 truncate">{rs.userName}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {remoteStreams.length > 0 ? (
@@ -867,6 +1005,81 @@ const InterviewRoom: React.FC = () => {
                         </div>
                     )}
                 </div>
+
+                {/* Proctoring status indicator — Candidate only */}
+                {!isRecruiter && interview && (
+                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${proctorWsConnected
+                        ? 'bg-emerald-500/10 border border-emerald-500/20'
+                        : 'bg-amber-500/10 border border-amber-500/20'
+                        }`}
+                        title={proctorWsConnected ? 'AI proctoring is active — gaze, tab-switch, and copy/paste are being monitored' : 'AI proctoring is connecting...'}
+                    >
+                        <Eye size={13} className={proctorWsConnected ? 'text-emerald-400' : 'text-amber-400'} />
+                        <span className={`text-xs font-medium ${proctorWsConnected ? 'text-emerald-400' : 'text-amber-400'}`}>
+                            AI Monitor {proctorWsConnected ? 'Active' : 'Connecting…'}
+                        </span>
+                        <div className={`w-1.5 h-1.5 rounded-full ${proctorWsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                    </div>
+                )}
+
+                {/* Proctoring alert dropdown — Recruiter only */}
+                {isRecruiter && proctorAlerts.length > 0 && (
+                    <div className="relative" ref={alertDropdownRef}>
+                        <button
+                            onClick={() => setIsAlertDropdownOpen(prev => !prev)}
+                            className={`flex items-center gap-2 px-3 py-1 rounded-full cursor-pointer transition-all duration-200 ${isAlertDropdownOpen
+                                ? 'bg-amber-500/20 border border-amber-500/50 ring-1 ring-amber-500/30'
+                                : 'bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/15'
+                                }`}
+                            title={`${proctorAlerts.length} proctoring alert(s) — click to ${isAlertDropdownOpen ? 'close' : 'view'}`}
+                        >
+                            <ShieldAlert size={13} className="text-amber-400" />
+                            <span className="text-xs font-semibold text-amber-400">
+                                {proctorAlerts.length} Alert{proctorAlerts.length !== 1 ? 's' : ''}
+                            </span>
+                        </button>
+
+                        {/* Dropdown panel */}
+                        {isAlertDropdownOpen && (
+                            <div className="absolute right-0 top-full mt-2 w-96 max-h-80 overflow-y-auto bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl backdrop-blur-md z-[10000]">
+                                {/* Header */}
+                                <div className="sticky top-0 bg-neutral-900/95 backdrop-blur-md px-4 py-3 border-b border-neutral-800 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <ShieldAlert size={14} className="text-amber-400" />
+                                        <span className="text-sm font-semibold text-white">Proctoring Alerts</span>
+                                    </div>
+                                    <span className="text-[11px] text-neutral-500">{proctorAlerts.length} total</span>
+                                </div>
+
+                                {/* Alert list */}
+                                <div className="px-2 py-2 flex flex-col gap-1.5">
+                                    {[...proctorAlerts].reverse().map((alert, i) => {
+                                        const icon = alert.type === 'tab_switch' ? '🔀'
+                                            : alert.type === 'copy' ? '📋'
+                                                : alert.type === 'paste' ? '📌'
+                                                    : alert.type === 'face_lost' ? '👤'
+                                                        : alert.type === 'gaze' ? '👁️' : '⚠️';
+                                        return (
+                                            <div key={i} className="flex items-start gap-2.5 px-3 py-2 rounded-lg hover:bg-neutral-800/60 transition-colors">
+                                                <span className="text-sm mt-0.5 flex-shrink-0">{icon}</span>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-xs font-semibold text-amber-300">{alert.candidateName || 'Candidate'}</p>
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 font-medium">
+                                                            {alert.type.replace('_', ' ')}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[11px] text-neutral-300 mt-0.5">{alert.detail}</p>
+                                                    <p className="text-[10px] text-neutral-500 mt-0.5">{new Date(alert.timestamp).toLocaleTimeString()}</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
             </header>
 
             {/* Main Content — Split View */}
@@ -904,8 +1117,10 @@ const InterviewRoom: React.FC = () => {
                     </div>
                 )}
 
+
+
                 {/* Left Side: Code Editor */}
-                <div className={`flex flex-col transition-all duration-300 ${isEditorFocused ? 'flex-[3]' : 'flex-[2]'}`}>
+                <div ref={editorContainerRef} className={`flex flex-col transition-all duration-300 ${isEditorFocused ? 'flex-[3]' : 'flex-[2]'}`}>
                     {/* Editor Header */}
                     <div className="h-10 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4">
                         <div className="flex items-center gap-2">
@@ -974,7 +1189,7 @@ const InterviewRoom: React.FC = () => {
                 </div>
 
                 {/* Right Side: Dynamic CSS Grid Video Feeds */}
-                <div className="flex-1 min-w-[300px] max-w-[520px] bg-neutral-950 border-l border-neutral-800 overflow-hidden">
+                <div className="flex-1 min-w-[300px] max-w-[520px] bg-neutral-900 border-l border-neutral-800 overflow-hidden relative">
                     <div className="video-grid" style={{ height: '100%' }}>
 
                         {/* Local Video Tile */}
@@ -1035,8 +1250,8 @@ const InterviewRoom: React.FC = () => {
                 </div>
             </div>
 
-            {/* Bottom Control Bar */}
-            <footer className="h-16 bg-neutral-900/80 border-t border-neutral-800 flex items-center justify-center gap-3 flex-shrink-0 backdrop-blur-sm">
+            {/* Bottom Control Bar - Floating Pill */}
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center justify-center gap-3 px-6 py-3 bg-neutral-900/95 border border-neutral-700/60 rounded-full shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-xl">
                 {/* Mute */}
                 <button
                     onClick={toggleMute}
@@ -1074,12 +1289,12 @@ const InterviewRoom: React.FC = () => {
                 </button>
 
                 {/* Divider */}
-                <div className="w-px h-8 bg-neutral-700 mx-1" />
+                <div className="w-px h-8 bg-neutral-700 mx-2" />
 
                 {/* End Call — visible to ALL users */}
                 <button
                     onClick={endCall}
-                    className="h-11 px-5 rounded-full bg-red-500 text-white hover:bg-red-600 flex items-center justify-center gap-2 transition-all duration-200 shadow-lg shadow-red-500/20 active:scale-95 text-sm font-medium"
+                    className="h-11 px-6 rounded-full bg-red-500 text-white hover:bg-red-600 flex items-center justify-center gap-2 transition-all duration-200 shadow-lg shadow-red-500/20 active:scale-95 text-sm font-semibold"
                     title="End Call & Leave"
                 >
                     <PhoneOff size={18} />
@@ -1089,12 +1304,12 @@ const InterviewRoom: React.FC = () => {
                 {/* Divider — only shown when recruiter controls appear */}
                 {isRecruiter && remoteStreams.length > 0 && (
                     <>
-                        <div className="w-px h-8 bg-neutral-700 mx-1" />
+                        <div className="w-px h-8 bg-neutral-700 mx-2" />
                         {/* Quick-kick from footer when only 1 remote peer */}
                         {remoteStreams.length === 1 && (
                             <button
                                 onClick={() => kickParticipant(remoteStreams[0].socketId)}
-                                className="h-11 px-4 rounded-full bg-neutral-800 text-red-400 border border-red-500/30 hover:bg-red-500/10 flex items-center justify-center gap-2 transition-all duration-200 text-sm font-medium"
+                                className="h-11 px-5 rounded-full bg-neutral-800 text-red-400 border border-red-500/30 hover:bg-red-500/10 flex items-center justify-center gap-2 transition-all duration-200 text-sm font-medium"
                                 title={`Remove ${remoteStreams[0].userName} from session`}
                             >
                                 <UserX size={18} />
@@ -1103,7 +1318,7 @@ const InterviewRoom: React.FC = () => {
                         )}
                     </>
                 )}
-            </footer>
+            </div>
         </div>
     );
 };
