@@ -24,6 +24,18 @@
   background: #9D4EDD;
 }
 
+.light ::-webkit-scrollbar-track {
+  background: rgba(123, 44, 191, 0.05);
+}
+
+.light ::-webkit-scrollbar-thumb {
+  background: rgba(123, 44, 191, 0.35);
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(123, 44, 191, 0.55);
+}
+
 /* ── Animations ── */
 @keyframes shimmer {
   0% {

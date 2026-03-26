@@ -9,6 +9,7 @@ import {
 import { useToast } from '../components/Toast';
 import { apiRequest } from '../utils/api';
 import { useProctoring, type ProctoringEvent } from '../hooks/useProctoring';
+import { useTheme } from '../components/ThemeContext';
 
 // ICE servers for WebRTC
 const ICE_SERVERS: RTCConfiguration = {
@@ -61,10 +62,10 @@ const VIDEO_GRID_STYLES = `
     position: relative;
     border-radius: 16px;
     overflow: hidden;
-    background: #111827;
+    background: var(--bg-card, #111827);
     min-height: 200px;
     max-height: 45vh;
-    border: 1px solid rgba(255,255,255,0.05);
+    border: 1px solid var(--border-color, rgba(255,255,255,0.05));
     transition: box-shadow 0.3s ease, transform 0.3s ease;
     box-shadow: 0 4px 20px rgba(0,0,0,0.3);
   }
@@ -88,9 +89,9 @@ const VIDEO_GRID_STYLES = `
     border-radius: 8px;
     font-size: 13px;
     font-weight: 500;
-    color: #fff;
+    color: var(--text-primary, #fff);
     pointer-events: none;
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid var(--border-color, rgba(255,255,255,0.1));
   }
   .video-tile .kick-btn {
     position: absolute;
@@ -134,7 +135,7 @@ const VIDEO_GRID_STYLES = `
   .video-tile .video-off-overlay {
     position: absolute;
     inset: 0;
-    background: #111827;
+    background: var(--bg-card, #111827);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -143,7 +144,7 @@ const VIDEO_GRID_STYLES = `
     width: 64px;
     height: 64px;
     border-radius: 50%;
-    background: #1f2937;
+    background: var(--bg-header, #1f2937);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -154,6 +155,7 @@ const InterviewRoom: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const { addToast, ToastContainer } = useToast();
+    const { isDark } = useTheme();
 
     // Interview state
     const [interview, setInterview] = useState<InterviewData | null>(null);
@@ -183,8 +185,14 @@ const InterviewRoom: React.FC = () => {
     const participantDropdownRef = useRef<HTMLDivElement>(null);
 
     // Code editor state
-    const [code, setCode] = useState<string>('// Welcome to the Procruit Interview Sandbox\n// Write your code here...\n\nfunction solution() {\n  \n}\n');
-    const [editorLanguage, setEditorLanguage] = useState('javascript');
+    const getStarterCode = (name = 'Candidate') => `# Welcome to the Procruit Interview Sandbox, ${name}!\n# Write your code here...\n\nprint("Hello World!")\n`;
+    const [code, setCode] = useState<string>(getStarterCode());
+    const [editorLanguage, setEditorLanguage] = useState('python');
+
+    // Adaptive Test State
+    const [adaptiveSession, setAdaptiveSession] = useState<any>(null);
+    const [lastEvaluation, setLastEvaluation] = useState<any>(null);
+    const [evaluating, setEvaluating] = useState(false);
 
     // Remote streams — one entry per connected peer
     const [remoteStreams, setRemoteStreams] = useState<RemoteStream[]>([]);
@@ -256,6 +264,13 @@ const InterviewRoom: React.FC = () => {
             try {
                 const data = await apiRequest(`/interviews/${id}`);
                 setInterview(data);
+                
+                // Personalize the welcome message based on fetched candidate data
+                if (code === getStarterCode('Candidate')) {
+                    const candidateName = data.candidateId?.name || 'Candidate';
+                    setCode(getStarterCode(candidateName));
+                }
+
                 setLoading(false);
             } catch (err: any) {
                 setError(err.message || 'Failed to load interview');
@@ -574,6 +589,14 @@ const InterviewRoom: React.FC = () => {
                 setRemoteStreams((prev) => prev.filter((rs) => rs.socketId !== socketId));
             });
 
+            // Adaptive Test Sync
+            socket.on('adaptive-test-sync', (data: any) => {
+                if (!isMounted) return;
+                console.log('[InterviewRoom] Received adaptive test sync', data);
+                if (data.sessionData) setAdaptiveSession(data.sessionData);
+                if (data.evaluation !== undefined) setLastEvaluation(data.evaluation);
+            });
+
             // ==============================
             // Real-Time Proctoring Alerts (Recruiter receives these)
             // ==============================
@@ -781,7 +804,11 @@ const InterviewRoom: React.FC = () => {
         if (socketRef.current) {
             socketRef.current.disconnect();
         }
-        const dashboardPath = user?.role === 'RECRUITER' ? '/recruiter/schedule' : '/candidate/interviews';
+        const isFreelancer = user?.role === 'INTERVIEWER' || user?.role === 'freelancer';
+        const dashboardPath = isFreelancer 
+            ? `/interviewer/feedback/${interview?._id}`
+            : (user?.role === 'RECRUITER' ? '/recruiter/schedule' : '/candidate/interviews');
+            
         navigate(dashboardPath);
     };
 
@@ -789,6 +816,85 @@ const InterviewRoom: React.FC = () => {
         if (socketRef.current) {
             socketRef.current.emit('kick-user', { targetSocketId });
             addToast('info', 'Participant has been removed from the session.');
+        }
+    };
+
+    // ===========================
+    // Adaptive Test Controls
+    // ===========================
+    const startAdaptiveTest = async () => {
+        if (!interview || !interview.candidateId) return;
+        try {
+            setEvaluating(true);
+            const res = await apiRequest('/coding-test/start', 'POST', { 
+                jobId: interview.jobId?._id, 
+                candidateId: interview.candidateId._id 
+            });
+            const sessionData = {
+                sessionId: res.sessionId,
+                currentQuestion: res.question,
+                questionNumber: res.questionNumber,
+                difficulty: res.currentDifficulty,
+                status: 'in_progress',
+                finalScore: null
+            };
+            setAdaptiveSession(sessionData);
+            setLastEvaluation(null);
+            
+            if (socketRef.current) {
+                socketRef.current.emit('adaptive-test-event', {
+                    sessionData,
+                    evaluation: null
+                });
+            }
+            addToast('success', 'Adaptive test started');
+        } catch (err: any) {
+            addToast('error', err.message || 'Failed to start test');
+        } finally {
+            setEvaluating(false);
+        }
+    };
+
+    const submitAndNextAdaptiveTest = async () => {
+        if (!adaptiveSession) return;
+        try {
+            setEvaluating(true);
+            const submitRes = await apiRequest(`/coding-test/${adaptiveSession.sessionId}/submit`, 'POST', { 
+                questionId: adaptiveSession.currentQuestion._id, 
+                submittedCode: codeRef.current 
+            });
+            
+            const passed = submitRes.passed;
+            addToast(passed ? 'success' : 'warning', passed ? 'All test cases passed!' : `Passed ${submitRes.score}% of test cases`);
+            
+            const nextRes = await apiRequest(`/coding-test/${adaptiveSession.sessionId}/next`);
+            
+            let newSessionData;
+            if (nextRes.done) {
+                newSessionData = { ...adaptiveSession, status: 'completed', finalScore: nextRes.finalScore };
+                addToast('success', `Test Completed! Final Score: ${nextRes.finalScore}%`);
+            } else {
+                newSessionData = {
+                    ...adaptiveSession,
+                    currentQuestion: nextRes.question,
+                    questionNumber: nextRes.questionNumber,
+                    difficulty: nextRes.currentDifficulty
+                };
+            }
+            
+            setAdaptiveSession(newSessionData);
+            setLastEvaluation(submitRes);
+            
+            if (socketRef.current) {
+                socketRef.current.emit('adaptive-test-event', {
+                    sessionData: newSessionData,
+                    evaluation: submitRes
+                });
+            }
+        } catch (err: any) {
+            addToast('error', err.message || 'Failed to evaluate code');
+        } finally {
+            setEvaluating(false);
         }
     };
 
@@ -920,13 +1026,13 @@ const InterviewRoom: React.FC = () => {
     const totalConnected = remoteStreams.length + 1; // +1 for local
 
     return (
-        <div className="h-screen bg-black text-white flex flex-col overflow-hidden">
+        <div className={`h-screen flex flex-col overflow-hidden ${isDark ? 'bg-black text-white' : 'bg-[#F3EEFF] text-[#1a0033]'}`}>
             {/* Inject video grid styles */}
             <style>{VIDEO_GRID_STYLES}</style>
             <ToastContainer />
 
             {/* Top Bar */}
-            <header className="relative z-[100] h-14 bg-neutral-900/80 border-b border-neutral-800 flex items-center justify-between px-4 flex-shrink-0 backdrop-blur-sm">
+            <header className={`relative z-[100] h-14 flex items-center justify-between px-4 flex-shrink-0 backdrop-blur-sm border-b ${isDark ? 'bg-neutral-900/80 border-neutral-800' : 'bg-white/80 border-purple-200'}`}>
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#7B2CBF] to-[#480CA8] flex items-center justify-center text-xs font-bold shadow-lg shadow-purple-500/20">
                         AI
@@ -935,13 +1041,25 @@ const InterviewRoom: React.FC = () => {
                         <h1 className="text-sm font-semibold">
                             {interview?.jobId?.title ? `Interview: ${interview.jobId.title}` : 'Procruit Interview'}
                         </h1>
-                        <p className="text-xs text-neutral-500">
+                        <p className={`text-xs ${isDark ? 'text-neutral-500' : 'text-[#6b46a0]'}`}>
                             {interview?.meetingId?.slice(0, 8)}... • {interview?.status}
                         </p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3 relative">
+                    {/* View Coding Test Results Button */}
+                    {isRecruiter && interview?.candidateId?._id && interview?.jobId?._id && (
+                        <button
+                            onClick={() => window.open(`#/recruiter/coding-test-result/${interview.jobId._id}/candidate/${interview.candidateId._id}`, '_blank')}
+                            className="flex items-center gap-2 px-3 py-1 bg-[#7B2CBF]/10 border border-[#7B2CBF]/30 hover:bg-[#7B2CBF]/20 rounded-full transition-colors shadow-lg shadow-purple-900/10"
+                            title="View candidate's adaptive coding test performance"
+                        >
+                            <Code size={13} className="text-[#9D4EDD]" />
+                            <span className="text-xs font-semibold text-[#9D4EDD]">Test Results</span>
+                        </button>
+                    )}
+
                     {/* Participant count */}
                     <div className="relative" ref={participantDropdownRef}>
                         <button
@@ -1122,39 +1240,32 @@ const InterviewRoom: React.FC = () => {
                 {/* Left Side: Code Editor */}
                 <div ref={editorContainerRef} className={`flex flex-col transition-all duration-300 ${isEditorFocused ? 'flex-[3]' : 'flex-[2]'}`}>
                     {/* Editor Header */}
-                    <div className="h-10 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4">
+                    <div className={`h-10 border-b flex items-center justify-between px-4 ${isDark ? 'bg-neutral-900 border-neutral-800' : 'bg-white border-purple-200'}`}>
                         <div className="flex items-center gap-2">
                             <Code size={14} className="text-[#7B2CBF]" />
-                            <span className="text-xs font-medium text-neutral-400">Coding Sandbox</span>
+                            <span className={`text-xs font-medium ${isDark ? 'text-neutral-400' : 'text-[#6b46a0]'}`}>Coding Sandbox</span>
+                            
+                            {isRecruiter && (!adaptiveSession || adaptiveSession.status === 'completed') && (
+                                <button
+                                    onClick={startAdaptiveTest}
+                                    disabled={evaluating}
+                                    className="ml-4 bg-[#7B2CBF]/20 text-[#9D4EDD] hover:bg-[#7B2CBF]/40 border border-[#7B2CBF]/30 px-3 py-1 rounded text-xs font-semibold transition"
+                                >
+                                    {evaluating ? 'Starting...' : 'Start Adaptive Test'}
+                                </button>
+                            )}
                         </div>
                         <div className="flex items-center gap-2">
                             <select
-                                value={editorLanguage}
-                                onChange={(e) => {
-                                    const lang = e.target.value;
-                                    setEditorLanguage(lang);
-                                    if (socketRef.current && interview) {
-                                        socketRef.current.emit('language-change', {
-                                            roomId: interview.meetingId,
-                                            language: lang,
-                                        });
-                                    }
-                                }}
-                                className="bg-neutral-800 border border-neutral-700 text-neutral-300 text-xs rounded px-2 py-1 focus:border-[#7B2CBF] outline-none"
+                                value="python"
+                                disabled
+                                className={`border text-xs rounded px-2 py-1 opacity-80 cursor-not-allowed outline-none ${isDark ? 'bg-neutral-800 border-neutral-700 text-neutral-300' : 'bg-purple-50 border-purple-200 text-[#6b46a0]'}`}
                             >
-                                <option value="javascript">JavaScript</option>
-                                <option value="typescript">TypeScript</option>
                                 <option value="python">Python</option>
-                                <option value="java">Java</option>
-                                <option value="cpp">C++</option>
-                                <option value="csharp">C#</option>
-                                <option value="go">Go</option>
-                                <option value="rust">Rust</option>
-                                <option value="sql">SQL</option>
                             </select>
                             <button
                                 onClick={() => setIsEditorFocused(!isEditorFocused)}
-                                className="text-neutral-500 hover:text-white transition-colors p-1"
+                                className={`transition-colors p-1 ${isDark ? 'text-neutral-500 hover:text-white' : 'text-[#6b46a0] hover:text-[#1a0033]'}`}
                                 title={isEditorFocused ? 'Minimize editor' : 'Maximize editor'}
                             >
                                 {isEditorFocused ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
@@ -1162,12 +1273,73 @@ const InterviewRoom: React.FC = () => {
                         </div>
                     </div>
 
+                    {/* Adaptive Test Panel */}
+                    {adaptiveSession && adaptiveSession.status === 'in_progress' && (
+                        <div className="bg-neutral-800 border-b border-neutral-700 p-4 max-h-48 overflow-y-auto shrink-0 transition-all">
+                            <div className="flex justify-between items-start mb-2">
+                                <div>
+                                    <h3 className="font-bold text-white text-base">
+                                        Q{adaptiveSession.questionNumber}: {adaptiveSession.currentQuestion?.title}
+                                    </h3>
+                                    <div className="flex gap-2 text-[10px] mt-1.5">
+                                        <span className="px-1.5 py-0.5 rounded bg-[#7B2CBF]/20 text-[#9D4EDD] uppercase font-bold border border-[#7B2CBF]/30">
+                                            {adaptiveSession.difficulty.replace('_', ' ')}
+                                        </span>
+                                        <span className="px-1.5 py-0.5 rounded bg-neutral-700 text-neutral-300 border border-neutral-600">
+                                            {adaptiveSession.currentQuestion?.category}
+                                        </span>
+                                    </div>
+                                </div>
+                                {isRecruiter && (
+                                    <button
+                                        onClick={submitAndNextAdaptiveTest}
+                                        disabled={evaluating}
+                                        className="bg-[#7B2CBF] hover:bg-[#9D4EDD] text-white px-3 py-1.5 rounded text-xs font-semibold transition-colors disabled:opacity-50 shadow-md whitespace-nowrap"
+                                    >
+                                        {evaluating ? 'Evaluating...' : 'Submit & Next Question'}
+                                    </button>
+                                )}
+                            </div>
+                            <p className="text-xs text-neutral-300 mt-2 whitespace-pre-wrap leading-relaxed">
+                                {adaptiveSession.currentQuestion?.description}
+                            </p>
+                            
+                            {lastEvaluation && (!lastEvaluation.passed) && (
+                                <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded p-2 text-xs text-red-200">
+                                    <strong className="text-red-400">Previous Result:</strong> Failed ({lastEvaluation.score}%). Next time, be sure to check logic and edge cases.
+                                </div>
+                            )}
+                            {lastEvaluation && lastEvaluation.passed && (
+                                <div className="mt-3 bg-green-500/10 border border-green-500/20 rounded p-2 text-xs text-green-200">
+                                    <strong className="text-green-400">Previous Result:</strong> Passed 100%!
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    
+                    {adaptiveSession && adaptiveSession.status === 'completed' && (
+                         <div className="bg-[#7B2CBF]/10 border-b border-[#7B2CBF]/30 p-4 shrink-0 flex items-center justify-between">
+                             <div>
+                                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                                    Test Completed
+                                </h3>
+                                <p className="text-xs text-neutral-400 mt-1">
+                                    The candidate has finished the adaptive coding test.
+                                </p>
+                             </div>
+                             <div className="text-right">
+                                <span className="block text-xl font-black text-emerald-400">{adaptiveSession.finalScore}%</span>
+                                <span className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold">Final Score</span>
+                             </div>
+                         </div>
+                    )}
+
                     {/* Monaco Editor */}
-                    <div className="flex-1">
+                    <div className="flex-1 relative">
                         <Editor
                             height="100%"
                             language={editorLanguage}
-                            theme="vs-dark"
+                            theme={isDark ? 'vs-dark' : 'light'}
                             value={code}
                             onChange={handleCodeChange}
                             options={{
@@ -1189,7 +1361,7 @@ const InterviewRoom: React.FC = () => {
                 </div>
 
                 {/* Right Side: Dynamic CSS Grid Video Feeds */}
-                <div className="flex-1 min-w-[300px] max-w-[520px] bg-neutral-900 border-l border-neutral-800 overflow-hidden relative">
+                <div className={`flex-1 min-w-[300px] max-w-[520px] border-l overflow-hidden relative ${isDark ? 'bg-neutral-900 border-neutral-800' : 'bg-[#EDE4FF] border-purple-200'}`}>
                     <div className="video-grid" style={{ height: '100%' }}>
 
                         {/* Local Video Tile */}
@@ -1251,13 +1423,15 @@ const InterviewRoom: React.FC = () => {
             </div>
 
             {/* Bottom Control Bar - Floating Pill */}
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center justify-center gap-3 px-6 py-3 bg-neutral-900/95 border border-neutral-700/60 rounded-full shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-xl">
+            <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center justify-center gap-3 px-6 py-3 border rounded-full backdrop-blur-xl ${isDark ? 'bg-neutral-900/95 border-neutral-700/60 shadow-[0_8px_32px_rgba(0,0,0,0.6)]' : 'bg-white/95 border-purple-200 shadow-[0_8px_32px_rgba(123,44,191,0.15)]'}`}>
                 {/* Mute */}
                 <button
                     onClick={toggleMute}
                     className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 ${isMuted
                         ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
-                        : 'bg-neutral-800 text-white border border-neutral-700 hover:bg-neutral-700'
+                        : isDark
+                            ? 'bg-neutral-800 text-white border border-neutral-700 hover:bg-neutral-700'
+                            : 'bg-purple-50 text-[#1a0033] border border-purple-200 hover:bg-purple-100'
                         }`}
                     title={isMuted ? 'Unmute' : 'Mute'}
                 >
@@ -1269,7 +1443,9 @@ const InterviewRoom: React.FC = () => {
                     onClick={toggleVideo}
                     className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 ${isVideoOff
                         ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
-                        : 'bg-neutral-800 text-white border border-neutral-700 hover:bg-neutral-700'
+                        : isDark
+                            ? 'bg-neutral-800 text-white border border-neutral-700 hover:bg-neutral-700'
+                            : 'bg-purple-50 text-[#1a0033] border border-purple-200 hover:bg-purple-100'
                         }`}
                     title={isVideoOff ? 'Turn on Video' : 'Turn off Video'}
                 >
@@ -1281,7 +1457,9 @@ const InterviewRoom: React.FC = () => {
                     onClick={toggleScreenShare}
                     className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 ${isScreenSharing
                         ? 'bg-[#7B2CBF]/20 text-[#7B2CBF] border border-[#7B2CBF]/30 hover:bg-[#7B2CBF]/30'
-                        : 'bg-neutral-800 text-white border border-neutral-700 hover:bg-neutral-700'
+                        : isDark
+                            ? 'bg-neutral-800 text-white border border-neutral-700 hover:bg-neutral-700'
+                            : 'bg-purple-50 text-[#1a0033] border border-purple-200 hover:bg-purple-100'
                         }`}
                     title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
                 >
@@ -1289,7 +1467,7 @@ const InterviewRoom: React.FC = () => {
                 </button>
 
                 {/* Divider */}
-                <div className="w-px h-8 bg-neutral-700 mx-2" />
+                <div className={`w-px h-8 mx-2 ${isDark ? 'bg-neutral-700' : 'bg-purple-200'}`} />
 
                 {/* End Call — visible to ALL users */}
                 <button
@@ -1304,12 +1482,12 @@ const InterviewRoom: React.FC = () => {
                 {/* Divider — only shown when recruiter controls appear */}
                 {isRecruiter && remoteStreams.length > 0 && (
                     <>
-                        <div className="w-px h-8 bg-neutral-700 mx-2" />
+                        <div className={`w-px h-8 mx-2 ${isDark ? 'bg-neutral-700' : 'bg-purple-200'}`} />
                         {/* Quick-kick from footer when only 1 remote peer */}
                         {remoteStreams.length === 1 && (
                             <button
                                 onClick={() => kickParticipant(remoteStreams[0].socketId)}
-                                className="h-11 px-5 rounded-full bg-neutral-800 text-red-400 border border-red-500/30 hover:bg-red-500/10 flex items-center justify-center gap-2 transition-all duration-200 text-sm font-medium"
+                                className={`h-11 px-5 rounded-full border flex items-center justify-center gap-2 transition-all duration-200 text-sm font-medium ${isDark ? 'bg-neutral-800 text-red-400 border-red-500/30 hover:bg-red-500/10' : 'bg-white text-red-500 border-red-400/30 hover:bg-red-50'}`}
                                 title={`Remove ${remoteStreams[0].userName} from session`}
                             >
                                 <UserX size={18} />

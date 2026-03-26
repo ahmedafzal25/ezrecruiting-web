@@ -59,8 +59,8 @@ export const InterviewerDashboard: React.FC = () => {
                 </Card>
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-8">
-                <Card title="Upcoming Schedule">
+            <div className="grid xl:grid-cols-2 gap-8">
+                <Card title="Upcoming Schedule" className="flex flex-col h-full">
                     {interviews.filter(i => i.status === 'Scheduled').length === 0 ? <p className="text-neutral-500">No interviews scheduled.</p> : (
                         <div className="space-y-4">
                             {interviews.filter(i => i.status === 'Scheduled').map(inv => (
@@ -131,6 +131,30 @@ export const InterviewerDashboard: React.FC = () => {
                                             Decline
                                         </Button>
                                     </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </Card>
+
+                <Card title="Pending Feedback" className="xl:col-span-2">
+                    {interviews.filter(i => (i.status === 'Completed' || i.status === 'Scheduled') && !i.feedback && new Date(i.scheduledTime || Date.now()).getTime() < Date.now()).length === 0 ? (
+                        <p className="text-neutral-500 text-center py-6">No pending feedback right now.</p>
+                    ) : (
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {interviews
+                                .filter(i => (i.status === 'Completed' || i.status === 'Scheduled') && !i.feedback && new Date(i.scheduledTime || Date.now()).getTime() < Date.now())
+                                .map(inv => (
+                                <div key={inv._id} className="p-4 border border-neutral-800 rounded-lg flex flex-col justify-between h-full bg-neutral-900/40">
+                                    <div>
+                                        <p className="font-bold text-white mb-2">{inv.candidateId?.name || 'Candidate'}</p>
+                                        <p className="text-xs text-neutral-400 mb-3">
+                                            {inv.scheduledTime ? new Date(inv.scheduledTime).toLocaleString() : 'Past Interview'}
+                                        </p>
+                                    </div>
+                                    <a href={`#/interviewer/feedback/${inv._id}`} className="text-sm font-semibold text-center bg-[#7B2CBF] px-4 py-2 rounded text-white hover:bg-[#9D4EDD] transition-colors">
+                                        Submit Evaluation
+                                    </a>
                                 </div>
                             ))}
                         </div>

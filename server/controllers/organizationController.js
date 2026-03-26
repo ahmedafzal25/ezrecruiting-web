@@ -1,5 +1,7 @@
 const User = require('../models/User');
 const Organization = require('../models/Organization');
+const Job = require('../models/Job');
+const Application = require('../models/Application');
 const bcrypt = require('bcryptjs');
 
 // @desc    Get all recruiters for the logged-in organization
@@ -112,6 +114,43 @@ exports.removeRecruiter = async (req, res) => {
         res.json({ message: 'Recruiter removed successfully' });
     } catch (err) {
         console.error('removeRecruiter error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// @desc    Get all jobs for this organization
+// @route   GET /api/organization/jobs
+// @access  Private (organization only)
+exports.getOrgJobs = async (req, res) => {
+    try {
+        const orgUser = await User.findById(req.user.id);
+        if (!orgUser.organization) {
+            return res.status(400).json({ message: 'You do not belong to an organization' });
+        }
+
+        // Find all users (recruiters + org admins) that belong to this organization
+        const teamUsers = await User.find({
+            organization: orgUser.organization
+        }).select('_id');
+        const teamUserIds = teamUsers.map(u => u._id);
+
+        // Fetch jobs where postedBy is in teamUserIds
+        const jobs = await Job.find({ postedBy: { $in: teamUserIds } })
+            .populate('postedBy', 'firstName lastName name email')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        // Calculate applicantCount for each job
+        const jobsWithStats = await Promise.all(
+            jobs.map(async (job) => {
+                const applicantCount = await Application.countDocuments({ job: job._id });
+                return { ...job, applicantCount };
+            })
+        );
+
+        res.json(jobsWithStats);
+    } catch (err) {
+        console.error('getOrgJobs error:', err);
         res.status(500).json({ message: 'Server error' });
     }
 };
