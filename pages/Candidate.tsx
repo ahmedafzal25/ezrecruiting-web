@@ -696,9 +696,20 @@ export const CandidateApplications: React.FC = () => {
                             <p className="text-[#7B2CBF] text-sm mb-4">{app.job?.company || 'Unknown Company'} • {app.job?.location || 'Remote'}</p>
                             <div className="mt-auto pt-4 border-t border-neutral-800 flex justify-between items-center">
                                 <span className="text-xs text-neutral-500">Applied: {new Date(app.appliedAt).toLocaleDateString()}</span>
-                                {app.aiScore !== null && (
-                                    <span className="text-xs font-semibold text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded">Score: {app.aiScore}</span>
-                                )}
+                                <div className="flex items-center gap-2">
+                                    {app.status === 'Pending AI' && (
+                                        <Button
+                                            size="sm"
+                                            onClick={() => window.location.href = `#/coding-test/${app.job?._id}`}
+                                            className="px-3 py-1 text-xs"
+                                        >
+                                            Start Coding Test
+                                        </Button>
+                                    )}
+                                    {app.aiScore !== null && (
+                                        <span className="text-xs font-semibold text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded">Score: {app.aiScore}</span>
+                                    )}
+                                </div>
                             </div>
                         </Card>
                     ))}

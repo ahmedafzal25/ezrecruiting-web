@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, Button, Badge } from './UI';
-import { User, Briefcase, GraduationCap, FileText, Download, BarChart2, Video, MessageSquare } from 'lucide-react';
+import { User, Briefcase, GraduationCap, FileText, Download, BarChart2, Video, MessageSquare, Code2 } from 'lucide-react';
 
 interface ApplicantReviewModalProps {
     isOpen: boolean;
@@ -75,6 +75,14 @@ export const ApplicantReviewModal: React.FC<ApplicantReviewModalProps> = ({
                                         <Download className="w-4 h-4 mr-1.5" /> Download Resume
                                     </a>
                                 )}
+                                <Button
+                                    variant="outline"
+                                    className="w-full justify-center border-neutral-700 text-neutral-300 hover:text-white"
+                                    onClick={() => window.open(`#/recruiter/coding-test-result/${application.job._id || application.job}/candidate/${application.candidate._id}`, '_blank')}
+                                >
+                                    <Code2 className="w-4 h-4 mr-2" />
+                                    Coding Test Results
+                                </Button>
                             </div>
                         </div>
                     </div>

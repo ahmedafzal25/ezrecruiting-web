@@ -10,9 +10,14 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   role: {
     type: String,
-    enum: ['ADMIN', 'organization', 'RECRUITER', 'CANDIDATE', 'INTERVIEWER'],
+    enum: ['ADMIN', 'organization', 'RECRUITER', 'CANDIDATE', 'INTERVIEWER', 'freelancer'],
     default: 'CANDIDATE'
   },
+
+  // Freelancer / Interviewer specifics embedded directly
+  skills: [String],
+  hourlyRate: { type: Number },
+  bio: { type: String },
 
   // Organization Link (For Org Admin & Recruiters)
   organization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization' },

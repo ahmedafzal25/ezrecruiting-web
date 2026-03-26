@@ -16,6 +16,11 @@ router.post('/schedule', protect, authorize('RECRUITER'), async (req, res) => {
     try {
         const { candidateId, recruiterId, interviewerId, jobId, scheduledTime, notes, isDirectBooking } = req.body;
 
+        const scheduledDate = new Date(scheduledTime);
+        if (scheduledDate < new Date()) {
+            return res.status(400).json({ message: 'Interview cannot be scheduled in the past' });
+        }
+
         // If it's a direct booking by recruiter to interviewer
         const interviewData = {
             recruiterId: req.user._id,
@@ -47,9 +52,9 @@ router.post('/schedule', protect, authorize('RECRUITER'), async (req, res) => {
             .populate('jobId', 'title company');
 
         res.status(201).json(populated);
-    } catch (err) {
-        console.error('Schedule interview error:', err);
-        res.status(500).json({ message: 'Failed to schedule interview' });
+    } catch (error) {
+        console.error("Scheduling Error Stack:", error);
+        res.status(500).json({ message: "Failed to schedule", error: error.message });
     }
 });
 
@@ -179,6 +184,61 @@ router.patch('/:id/status', protect, async (req, res) => {
     } catch (err) {
         console.error('Update interview status error:', err);
         res.status(500).json({ message: 'Failed to update interview status' });
+    }
+});
+
+// Delete Interview
+router.delete('/:id', protect, authorize('RECRUITER'), async (req, res) => {
+    try {
+        const interview = await Interview.findById(req.params.id);
+        if (!interview) {
+            return res.status(404).json({ message: 'Interview not found' });
+        }
+
+        if (interview.recruiterId.toString() !== req.user._id.toString() && req.user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Not authorized to delete this interview' });
+        }
+
+        await Interview.deleteOne({ _id: interview._id });
+        res.json({ message: 'Interview deleted successfully' });
+    } catch (err) {
+        console.error('Delete interview error:', err);
+        res.status(500).json({ message: 'Failed to delete interview' });
+    }
+});
+
+// Submit Interview Feedback
+router.post('/:id/feedback', protect, async (req, res) => {
+    try {
+        const { technicalScore, communicationScore, detailedFeedback } = req.body;
+        
+        const interview = await Interview.findById(req.params.id);
+        if (!interview) {
+            return res.status(404).json({ message: 'Interview not found' });
+        }
+
+        // Validate user is the assigned interviewer or recruiter
+        const userId = req.user._id.toString();
+        const isInterviewer = interview.interviewerId?.toString() === userId;
+        const isRecruiter = interview.recruiterId.toString() === userId;
+
+        if (!isInterviewer && !isRecruiter && req.user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Not authorized to submit feedback for this interview' });
+        }
+
+        interview.feedback = {
+            technicalScore: Number(technicalScore),
+            communicationScore: Number(communicationScore),
+            detailedFeedback
+        };
+        interview.status = 'Completed';
+
+        await interview.save();
+        
+        res.json(interview);
+    } catch (err) {
+        console.error('Submit feedback error:', err);
+        res.status(500).json({ message: 'Failed to submit feedback' });
     }
 });
 

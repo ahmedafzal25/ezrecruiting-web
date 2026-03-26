@@ -24,6 +24,11 @@ const interviewSchema = new mongoose.Schema({
     detail: String,
     timestamp: Date,
   }],
+  feedback: {
+    technicalScore: { type: Number, min: 0, max: 100 },
+    communicationScore: { type: Number, min: 0, max: 100 },
+    detailedFeedback: { type: String }
+  },
   createdAt: { type: Date, default: Date.now }
 });
 

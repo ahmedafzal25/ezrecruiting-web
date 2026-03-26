@@ -50,6 +50,7 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
     const [interviews, setInterviews] = useState<InterviewData[]>([]);
     const [loading, setLoading] = useState(true);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
+    const [showHistoryModal, setShowHistoryModal] = useState(false);
 
     // Schedule form state (Recruiter only)
     const [candidates, setCandidates] = useState<CandidateOption[]>([]);
@@ -181,6 +182,17 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
         }
     };
 
+    const handleDelete = async (interviewId: string) => {
+        if (!window.confirm("Are you sure you want to cancel this interview? This action cannot be undone.")) return;
+        try {
+            await apiRequest(`/interviews/${interviewId}`, 'DELETE');
+            addToast('success', 'Interview cancelled successfully');
+            fetchInterviews();
+        } catch (err: any) {
+            addToast('error', err.message || 'Failed to cancel interview');
+        }
+    };
+
     // Split interviews into upcoming vs past
     const now = new Date();
     const upcomingInterviews = interviews.filter(
@@ -297,6 +309,16 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                                                 Pay & Confirm
                                             </Button>
                                         )}
+                                        {role === 'RECRUITER' && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="border-red-500/50 text-red-500 hover:bg-red-500/10"
+                                                onClick={() => handleDelete(interview._id)}
+                                            >
+                                                Cancel
+                                            </Button>
+                                        )}
                                         {isJoinable(interview) && (
                                             <Button
                                                 variant="secondary"
@@ -315,45 +337,56 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                 )}
             </div>
 
-            {/* Past Interviews */}
+            {/* History Summary & Button */}
             {pastInterviews.length > 0 && (
-                <div>
-                    <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-                        <Clock size={18} className="text-neutral-500" />
-                        Past
-                    </h3>
-                    <div className="grid gap-3">
-                        {pastInterviews.map((interview) => (
-                            <Card key={interview._id} className="opacity-70">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-neutral-500 font-bold">
-                                            {(role === 'RECRUITER'
-                                                ? interview.candidateId?.name
-                                                : interview.recruiterId?.name
-                                            )?.charAt(0)?.toUpperCase() || '?'}
-                                        </div>
-                                        <div>
-                                            <h4 className="font-medium text-neutral-300">
-                                                {role === 'RECRUITER'
-                                                    ? interview.candidateId?.name
-                                                    : interview.recruiterId?.name}
-                                            </h4>
-                                            <div className="flex items-center gap-3 text-xs text-neutral-500">
-                                                <span>{formatDate(interview.scheduledTime)}</span>
-                                                {interview.jobId && <span>{interview.jobId.title}</span>}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <Badge variant={statusBadgeVariant[interview.status] || 'neutral'}>
-                                        {interview.status}
-                                    </Badge>
-                                </div>
-                            </Card>
-                        ))}
+                <div className="pt-6 mt-6 border-t border-neutral-800 flex items-center justify-between">
+                    <div>
+                        <h3 className="text-lg font-semibold text-white">Interview History</h3>
+                        <p className="text-sm text-neutral-400">View your completed, cancelled, or past interviews.</p>
                     </div>
+                    <Button variant="outline" icon={Clock} onClick={() => setShowHistoryModal(true)}>
+                        View Past Interviews
+                    </Button>
                 </div>
             )}
+
+            {/* History Modal */}
+            <Modal
+                isOpen={showHistoryModal}
+                onClose={() => setShowHistoryModal(false)}
+                title="Interview History"
+            >
+                <div className="grid gap-3 max-h-[60vh] overflow-y-auto pr-2 pb-4">
+                    {pastInterviews.map((interview) => (
+                        <Card key={interview._id} className="opacity-80 border-neutral-800">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-neutral-500 font-bold shrink-0">
+                                        {(role === 'RECRUITER'
+                                            ? interview.candidateId?.name
+                                            : interview.recruiterId?.name
+                                        )?.charAt(0)?.toUpperCase() || '?'}
+                                    </div>
+                                    <div>
+                                        <h4 className="font-medium text-neutral-300">
+                                            {role === 'RECRUITER'
+                                                ? interview.candidateId?.name
+                                                : interview.recruiterId?.name}
+                                        </h4>
+                                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500 mt-1">
+                                            <span>{formatDate(interview.scheduledTime)}</span>
+                                            {interview.jobId && <span>{interview.jobId.title}</span>}
+                                        </div>
+                                    </div>
+                                </div>
+                                <Badge variant={statusBadgeVariant[interview.status] || 'neutral'} className="shrink-0 ml-4">
+                                    {interview.status}
+                                </Badge>
+                            </div>
+                        </Card>
+                    ))}
+                </div>
+            </Modal>
 
             {/* Schedule Interview Modal (Recruiter only) */}
             <Modal
