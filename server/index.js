@@ -14,6 +14,9 @@ const jobRoutes = require('./routes/jobRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const stripeRoutes = require('./routes/stripeRoutes');
 const applicationRoutes = require('./routes/applicationRoutes');
+const organizationRoutes = require('./routes/organizationRoutes');
+const codingTestRoutes   = require('./routes/codingTestRoutes');
+const freelancerRoutes   = require('./routes/freelancerRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -54,6 +57,9 @@ app.use('/api/jobs', jobRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', stripeRoutes);
 app.use('/api/applications', applicationRoutes);
+app.use('/api/organization', organizationRoutes);
+app.use('/api/coding-test', codingTestRoutes);
+app.use('/api/freelancers', freelancerRoutes);
 
 app.get('/', (req, res) => {
   res.send('API is running...');
@@ -344,6 +350,13 @@ io.on('connection', (socket) => {
     // Emit directly to the target socket so only that specific user is notified
     io.to(targetSocketId).emit('kicked-from-room');
     console.log(`[Socket.IO] ${socket.userName} kicked socket: ${targetSocketId} from room: ${socket.currentRoom}`);
+  });
+
+  // --- Adaptive Test Sync ---
+  socket.on('adaptive-test-event', (data) => {
+    const interviewId = socket.currentRoom;
+    if (!interviewId) return;
+    socket.to(interviewId).emit('adaptive-test-sync', data);
   });
 
   // --- Disconnect ---

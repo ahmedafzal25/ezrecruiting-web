@@ -200,6 +200,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
 
   const interviewerLinks: SidebarItem[] = [
     { name: 'Dashboard', path: '/interviewer', icon: LayoutDashboard },
+    { name: 'Find Gigs', path: '/interviewer/gigs', icon: Briefcase },
     { name: 'My Schedule', path: '/interviewer/schedule', icon: Calendar },
     { name: 'Requests', path: '/interviewer/requests', icon: MessageSquare },
     { name: 'My Profile', path: '/interviewer/profile', icon: User },
@@ -207,7 +208,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
 
   const orgAdminLinks: SidebarItem[] = [
     { name: 'Dashboard', path: '/organization/dashboard', icon: LayoutDashboard },
-    { name: 'Manage Team', path: '/organization/dashboard', icon: Users },
+    { name: 'Company Jobs', path: '/organization/jobs', icon: Briefcase },
+    { name: 'Team', path: '/organization/team', icon: Users },
     { name: 'Settings', path: '/organization/settings', icon: Settings },
   ];
 

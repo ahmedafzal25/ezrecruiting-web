@@ -304,7 +304,7 @@ export const Applicants: React.FC = () => {
     const [isMessageOpen, setIsMessageOpen] = useState(false);
 
     // Modal Forms
-    const [scheduleData, setScheduleData] = useState({ date: '', time: '', link: '' });
+    const [scheduleData, setScheduleData] = useState({ date: '', time: '' });
     const [messageData, setMessageData] = useState({ content: '' });
 
     const fetchApplications = async () => {
@@ -351,11 +351,11 @@ export const Applicants: React.FC = () => {
         }
 
         try {
+            const scheduledTime = new Date(`${scheduleData.date}T${scheduleData.time}`).toISOString();
             await apiRequest('/interviews/schedule', 'POST', {
                 candidateId: selectedApp.candidate._id,
-                date: scheduleData.date,
-                time: scheduleData.time,
-                meetingLink: scheduleData.link
+                jobId: selectedApp.job?._id,
+                scheduledTime
             });
             alert('Interview scheduled!');
             await handleStatusUpdate(selectedApp._id, 'Interview');
@@ -465,7 +465,6 @@ export const Applicants: React.FC = () => {
                         <Input label="Date" type="date" min={minDateLocal} value={scheduleData.date} onChange={e => setScheduleData({ ...scheduleData, date: e.target.value })} />
                         <Input label="Time" type="time" min={minTimeLocal} value={scheduleData.time} onChange={e => setScheduleData({ ...scheduleData, time: e.target.value })} />
                     </div>
-                    <Input label="Meeting Link" placeholder="https://zoom.us/j/..." value={scheduleData.link} onChange={e => setScheduleData({ ...scheduleData, link: e.target.value })} />
                     <div className="flex justify-end gap-3 pt-4">
                         <Button variant="ghost" onClick={() => setIsScheduleOpen(false)}>Cancel</Button>
                         <Button onClick={handleSchedule}>Confirm Schedule</Button>

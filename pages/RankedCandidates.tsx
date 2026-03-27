@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, Button, Badge } from '../components/UI';
-import { ArrowLeft, Trophy, TrendingUp, AlertCircle, ChevronDown, ChevronUp, Search, Users, Sparkles, RefreshCw, Loader2 } from 'lucide-react';
+import { ArrowLeft, Trophy, TrendingUp, AlertCircle, ChevronDown, ChevronUp, Search, Users, Sparkles, RefreshCw, Loader2, Code2 } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 
 interface RankedCandidate {
@@ -436,6 +436,15 @@ export const RankedCandidates: React.FC = () => {
                                                 CV
                                             </a>
                                         )}
+                                        <a 
+                                            href={`#/recruiter/coding-test-result/${jobId}/candidate/${app.candidate._id}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-white bg-[#7B2CBF]/20 hover:bg-[#7B2CBF]/40 border border-[#7B2CBF]/50 px-3 py-1.5 rounded flex items-center gap-1.5 ml-3 transition-colors"
+                                            onClick={e => e.stopPropagation()}
+                                        >
+                                            <Code2 size={14} /> Coding Test Response
+                                        </a>
                                     </div>
                                 </div>
                             )}
