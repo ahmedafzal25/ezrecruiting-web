@@ -34,15 +34,15 @@ interface TestSession {
 
 const DIFFICULTY_CONFIG: Record<string, { color: string; bg: string; border: string }> = {
   very_easy: { color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/30' },
-  easy:      { color: 'text-green-400',   bg: 'bg-green-400/10',   border: 'border-green-400/30'   },
-  medium:    { color: 'text-yellow-400',  bg: 'bg-yellow-400/10',  border: 'border-yellow-400/30'  },
-  hard:      { color: 'text-red-400',     bg: 'bg-red-400/10',     border: 'border-red-400/30'     },
+  easy: { color: 'text-green-400', bg: 'bg-green-400/10', border: 'border-green-400/30' },
+  medium: { color: 'text-yellow-400', bg: 'bg-yellow-400/10', border: 'border-yellow-400/30' },
+  hard: { color: 'text-red-400', bg: 'bg-red-400/10', border: 'border-red-400/30' },
 };
 
 const CATEGORY_CONFIG: Record<string, { label: string }> = {
   basics: { label: 'Python Basics' },
-  oop:    { label: 'OOP' },
-  dsa:    { label: 'Data Structures & Algorithms' },
+  oop: { label: 'OOP' },
+  dsa: { label: 'Data Structures & Algorithms' },
 };
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ export const AdaptiveResultReview: React.FC = () => {
 
   useEffect(() => {
     if (!jobId || !candidateId) return;
-    
+
     apiRequest(`/coding-test/job/${jobId}/candidate/${candidateId}`)
       .then(data => {
         setSession(data);
@@ -140,23 +140,22 @@ export const AdaptiveResultReview: React.FC = () => {
 
       {/* ── Main Layout ── */}
       <div className="flex gap-6 flex-1 min-h-0">
-        
+
         {/* Left: Timeline */}
         <div className="w-1/3 min-w-[320px] max-w-[400px] flex flex-col gap-4 overflow-y-auto pr-2">
           {questionsAsked.map((q, i) => {
             const resp = responses.find(r => r.questionId === q._id);
             const isSelected = selectedIndex === i;
             const hasAnswered = !!resp;
-            
+
             return (
               <div
                 key={q._id}
                 onClick={() => setSelectedIndex(i)}
-                className={`relative p-4 rounded-xl border transition-all cursor-pointer overflow-hidden ${
-                  isSelected
-                    ? 'bg-[#12002b]/80 border-[#7B2CBF] shadow-[0_0_20px_rgba(123,44,191,0.15)] scale-[1.02]'
-                    : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'
-                }`}
+                className={`relative p-4 rounded-xl border transition-all cursor-pointer ${isSelected
+                  ? 'bg-[#12002b]/80 border-[#7B2CBF] shadow-[0_0_20px_rgba(123,44,191,0.15)]'
+                  : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'
+                  }`}
               >
                 {/* Connecting Line (except first) */}
                 {i > 0 && (
@@ -165,9 +164,8 @@ export const AdaptiveResultReview: React.FC = () => {
 
                 <div className="flex gap-4 items-start relative z-10">
                   {/* Icon / Number */}
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 font-bold text-sm ${
-                    isSelected ? 'bg-gradient-to-br from-[#7B2CBF] to-[#9D4EDD] text-white' : 'bg-neutral-800 text-neutral-400'
-                  }`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 font-bold text-sm ${isSelected ? 'bg-gradient-to-br from-[#7B2CBF] to-[#9D4EDD] text-white' : 'bg-neutral-800 text-neutral-400'
+                    }`}>
                     {i + 1}
                   </div>
 
@@ -176,7 +174,7 @@ export const AdaptiveResultReview: React.FC = () => {
                     <h4 className={`font-bold text-sm mb-1 truncate ${isSelected ? 'text-white' : 'text-neutral-300'}`}>
                       {q.title}
                     </h4>
-                    
+
                     <div className="flex gap-2 flex-wrap mb-3">
                       <span className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase border ${DIFFICULTY_CONFIG[q.difficulty].color} ${DIFFICULTY_CONFIG[q.difficulty].bg} ${DIFFICULTY_CONFIG[q.difficulty].border}`}>
                         {q.difficulty.replace('_', ' ')}
@@ -211,7 +209,7 @@ export const AdaptiveResultReview: React.FC = () => {
               {/* Header */}
               <div className="px-6 py-4 border-b border-neutral-800 bg-neutral-900/50 flex justify-between items-center shrink-0">
                 <h3 className="font-bold text-lg text-white">Q{selectedIndex + 1}: {selectedQuestion.title}</h3>
-                
+
                 {selectedResponse && (
                   <Badge variant={selectedResponse.passed ? 'success' : 'error'} className="px-3 py-1">
                     Score: {selectedResponse.score}%
