@@ -18,6 +18,20 @@ const userSchema = new mongoose.Schema({
   skills: [String],
   hourlyRate: { type: Number },
   bio: { type: String },
+  averageRating: { type: Number, default: 0 },
+  experience: [{
+    title: { type: String, required: true },
+    company: { type: String, required: true },
+    startDate: { type: Date, required: true },
+    endDate: { type: Date }, // null indicates "Present"
+    description: { type: String }
+  }],
+  projects: [{
+    title: { type: String, required: true },
+    role: { type: String },
+    link: { type: String },
+    description: { type: String }
+  }],
 
   // Organization Link (For Org Admin & Recruiters)
   organization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization' },

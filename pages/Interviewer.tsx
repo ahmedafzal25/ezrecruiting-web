@@ -1,10 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, Button, Input, Badge, Modal } from '../components/UI';
-import { Video, Calendar, DollarSign, Clock, User, Briefcase, Star, Upload, MessageSquare } from 'lucide-react';
+import { Video, Calendar, DollarSign, Clock, User, Briefcase, Star, Upload, MessageSquare, Plus, Edit2, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { User as UserType, Interview, Message } from '../types';
 import InterviewsTab from '../components/InterviewsTab';
+import { FreelancerProfile } from '../components/FreelancerProfile';
 
 const convertToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -61,21 +63,76 @@ export const InterviewerDashboard: React.FC = () => {
 
             <div className="grid xl:grid-cols-2 gap-8">
                 <Card title="Upcoming Schedule" className="flex flex-col h-full">
-                    {interviews.filter(i => i.status === 'Scheduled').length === 0 ? <p className="text-neutral-500">No interviews scheduled.</p> : (
-                        <div className="space-y-4">
-                            {interviews.filter(i => i.status === 'Scheduled').map(inv => (
-                                <div key={inv._id} className="p-4 bg-neutral-800 rounded-lg flex justify-between items-center">
-                                    <div>
-                                        <p className="font-bold text-white flex items-center gap-2"><Video size={16} className="text-[#7B2CBF]" /> Interview</p>
-                                        <p className="text-xs text-neutral-400">
-                                            {inv.scheduledTime ? new Date(inv.scheduledTime).toLocaleString() : `${inv.date} at ${inv.time}`}
-                                        </p>
+                    {interviews.filter(i => i.status === 'Scheduled').length === 0 ? <p className="text-neutral-500">No interviews scheduled.</p> : (() => {
+                        const scheduled = interviews.filter(i => i.status === 'Scheduled');
+                        const visible   = scheduled.slice(0, 3);
+                        const overflow  = scheduled.length - visible.length;
+                        return (
+                            <div className="space-y-3">
+                                {visible.map(inv => {
+                                const candidate = (inv.candidateId as any);
+                                const recruiter = (inv.recruiterId as any);
+                                const job = (inv.jobId as any);
+                                const candidateName =
+                                    candidate?.name ||
+                                    (candidate?.firstName || candidate?.lastName
+                                        ? `${candidate?.firstName ?? ''} ${candidate?.lastName ?? ''}`.trim()
+                                        : null) ||
+                                    'Unknown Candidate';
+                                const jobTitle = job?.title || 'Unspecified Role';
+                                const company = job?.company || recruiter?.companyName || recruiter?.name || 'Unknown Company';
+
+                                return (
+                                    <div key={inv._id} className="p-4 bg-neutral-800 rounded-lg flex justify-between items-start gap-4">
+                                        <div className="flex-1 min-w-0">
+                                            {/* Candidate */}
+                                            <p className="font-bold text-white flex items-center gap-2 truncate">
+                                                <User size={14} className="text-[#7B2CBF] flex-shrink-0" />
+                                                {candidateName}
+                                            </p>
+                                            {/* Job title */}
+                                            <p className="text-sm text-neutral-300 flex items-center gap-2 mt-1 truncate">
+                                                <Briefcase size={13} className="text-neutral-500 flex-shrink-0" />
+                                                {jobTitle}
+                                            </p>
+                                            {/* Company / Recruiter */}
+                                            <p className="text-xs text-neutral-500 flex items-center gap-2 mt-0.5 truncate">
+                                                <Star size={11} className="text-neutral-600 flex-shrink-0" />
+                                                via {company}
+                                            </p>
+                                            {/* Date/time */}
+                                            <p className="text-xs text-neutral-400 flex items-center gap-2 mt-2">
+                                                <Clock size={11} className="text-[#7B2CBF] flex-shrink-0" />
+                                                {inv.scheduledTime ? new Date(inv.scheduledTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : `${(inv as any).date} at ${(inv as any).time}`}
+                                            </p>
+                                        </div>
+                                        <a
+                                            href={`#/interview/room/${inv.meetingId}`}
+                                            className="text-xs bg-[#7B2CBF] px-3 py-1.5 rounded text-white hover:bg-[#9D4EDD] transition-colors whitespace-nowrap flex-shrink-0 self-center"
+                                        >
+                                            Join Room
+                                        </a>
                                     </div>
-                                    <a href={`#/interview/room/${inv.meetingId}`} className="text-xs bg-[#7B2CBF] px-3 py-1 rounded text-white hover:bg-[#9D4EDD]">Join Room</a>
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                                );
+                            })}
+
+                                {/* Overflow badge */}
+                                {overflow > 0 && (
+                                    <p className="text-xs text-neutral-500 text-center py-1">
+                                        +{overflow} more interview{overflow > 1 ? 's' : ''} not shown
+                                    </p>
+                                )}
+
+                                {/* View full schedule link */}
+                                <Link
+                                    to="/interviewer/schedule"
+                                    className="block w-full text-center text-sm font-medium text-[#9D4EDD] hover:text-[#c084fc] mt-1 pt-3 border-t border-neutral-700 transition-colors"
+                                >
+                                    View Full Schedule &rarr;
+                                </Link>
+                            </div>
+                        );
+                    })()}
                 </Card>
 
                 <Card title="Booking Requests">
@@ -106,7 +163,7 @@ export const InterviewerDashboard: React.FC = () => {
                                             size="sm"
                                             onClick={async () => {
                                                 try {
-                                                    await apiRequest(`/interviews/${inv._id}/status`, 'PATCH', { status: 'Accepted' });
+                                                    await apiRequest(`/freelancers/requests/${inv._id}/accept`, 'PUT');
                                                     alert("Interview accepted!");
                                                     // Refresh list
                                                     apiRequest('/interviews/my-interviews').then(setInterviews);
@@ -121,7 +178,7 @@ export const InterviewerDashboard: React.FC = () => {
                                             size="sm"
                                             onClick={async () => {
                                                 try {
-                                                    await apiRequest(`/interviews/${inv._id}/status`, 'PATCH', { status: 'Rejected' });
+                                                    await apiRequest(`/freelancers/requests/${inv._id}/reject`, 'PUT');
                                                     alert("Interview rejected");
                                                     // Refresh list
                                                     apiRequest('/interviews/my-interviews').then(setInterviews);
@@ -281,6 +338,11 @@ export const InterviewerProfile: React.FC = () => {
                     </div>
                 </Card>
             </div>
+
+            {/* Trust & Verification Portfolio Builder */}
+            <div className="mt-8">
+                <FreelancerProfile />
+            </div>
         </div>
     );
 };
@@ -386,3 +448,207 @@ export const InterviewerRequests: React.FC = () => {
         </div>
     );
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FREELANCER SERVICE MANAGER
+// Allows a freelancer to create, edit, toggle, and delete their service listings
+// ─────────────────────────────────────────────────────────────────────────────
+interface MyService {
+    _id: string;
+    title: string;
+    description: string;
+    skills: string[];
+    price: number;
+    durationMinutes: number;
+    isActive: boolean;
+}
+
+const EMPTY_FORM = { title: '', description: '', skills: '', price: '', durationMinutes: '60' };
+
+export const FreelancerServiceManager: React.FC = () => {
+    const [services, setServices] = useState<MyService[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [formOpen, setFormOpen] = useState(false);
+    const [editing, setEditing] = useState<MyService | null>(null);
+    const [form, setForm] = useState(EMPTY_FORM);
+    const [saving, setSaving] = useState(false);
+
+    const fetchServices = async () => {
+        setLoading(true);
+        try {
+            const data = await apiRequest('/freelancers/services');
+            setServices(data);
+        } catch (err) { console.error(err); }
+        finally { setLoading(false); }
+    };
+
+    useEffect(() => { fetchServices(); }, []);
+
+    const openCreate = () => {
+        setEditing(null);
+        setForm(EMPTY_FORM);
+        setFormOpen(true);
+    };
+
+    const openEdit = (svc: MyService) => {
+        setEditing(svc);
+        setForm({
+            title: svc.title,
+            description: svc.description,
+            skills: svc.skills.join(', '),
+            price: svc.price.toString(),
+            durationMinutes: svc.durationMinutes.toString(),
+        });
+        setFormOpen(true);
+    };
+
+    const handleSave = async () => {
+        if (!form.title || !form.description || !form.price) {
+            alert('Title, description, and price are required.'); return;
+        }
+        setSaving(true);
+        try {
+            const payload = {
+                title: form.title,
+                description: form.description,
+                skills: form.skills,
+                price: Number(form.price),
+                durationMinutes: Number(form.durationMinutes) || 60,
+            };
+            if (editing) {
+                await apiRequest(`/freelancers/services/${editing._id}`, 'PUT', payload);
+            } else {
+                await apiRequest('/freelancers/services', 'POST', payload);
+            }
+            setFormOpen(false);
+            fetchServices();
+        } catch (err: any) {
+            alert(err.message || 'Failed to save service');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleToggle = async (svc: MyService) => {
+        try {
+            await apiRequest(`/freelancers/services/${svc._id}`, 'PUT', { isActive: !svc.isActive });
+            fetchServices();
+        } catch (err: any) { alert('Failed to update'); }
+    };
+
+    const handleDelete = async (svc: MyService) => {
+        if (!confirm(`Delete "${svc.title}"? This cannot be undone.`)) return;
+        try {
+            await apiRequest(`/freelancers/services/${svc._id}`, 'DELETE');
+            fetchServices();
+        } catch (err: any) { alert('Failed to delete'); }
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="flex justify-between items-center">
+                <div>
+                    <h2 className="text-2xl font-bold">My Services</h2>
+                    <p className="text-neutral-400 text-sm mt-1">Publish interview services for recruiters to book.</p>
+                </div>
+                <Button icon={Plus} onClick={openCreate}>Create Service</Button>
+            </div>
+
+            {loading ? (
+                <div className="grid md:grid-cols-2 gap-4">
+                    {[1, 2].map(i => <div key={i} className="h-36 bg-neutral-900 border border-neutral-800 rounded-xl animate-pulse" />)}
+                </div>
+            ) : services.length === 0 ? (
+                <div className="text-center py-20 border border-neutral-800 rounded-xl">
+                    <Briefcase size={48} className="text-neutral-700 mx-auto mb-4" />
+                    <p className="text-neutral-500 text-lg font-medium">No services yet</p>
+                    <p className="text-neutral-600 text-sm mt-1 mb-6">Create your first service so recruiters can find and book you.</p>
+                    <Button icon={Plus} onClick={openCreate}>Create Your First Service</Button>
+                </div>
+            ) : (
+                <div className="grid md:grid-cols-2 gap-4">
+                    {services.map(svc => (
+                        <div key={svc._id} className={`p-5 rounded-xl border transition-all ${
+                            svc.isActive
+                                ? 'bg-neutral-900 border-neutral-800 hover:border-[#7B2CBF]/40'
+                                : 'bg-neutral-950 border-neutral-800/50 opacity-60'
+                        }`}>
+                            <div className="flex justify-between items-start gap-3">
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <h3 className="font-bold text-white truncate">{svc.title}</h3>
+                                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                            svc.isActive ? 'bg-green-500/15 text-green-400' : 'bg-neutral-700 text-neutral-400'
+                                        }`}>
+                                            {svc.isActive ? 'Live' : 'Paused'}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-neutral-400 line-clamp-1">{svc.description}</p>
+                                    <div className="flex flex-wrap gap-1.5 mt-2">
+                                        {svc.skills.slice(0, 4).map((s, i) => (
+                                            <span key={i} className="text-[10px] px-2 py-0.5 bg-neutral-800 text-neutral-400 rounded-full border border-neutral-700">{s}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="text-right flex-shrink-0">
+                                    <p className="text-xl font-black text-white">${svc.price}</p>
+                                    <p className="text-xs text-neutral-500">{svc.durationMinutes} min</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-2 mt-4 pt-4 border-t border-neutral-800">
+                                <Button size="sm" variant="outline" className="flex-1 gap-1.5" onClick={() => openEdit(svc)}>
+                                    <Edit2 size={12} /> Edit
+                                </Button>
+                                <Button size="sm" variant="outline" className="flex-1 gap-1.5" onClick={() => handleToggle(svc)}>
+                                    {svc.isActive ? <ToggleRight size={14} className="text-green-400" /> : <ToggleLeft size={14} />}
+                                    {svc.isActive ? 'Pause' : 'Activate'}
+                                </Button>
+                                <Button size="sm" variant="outline" className="text-red-400 border-red-900/40 hover:bg-red-900/20" onClick={() => handleDelete(svc)}>
+                                    <Trash2 size={13} />
+                                </Button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Create / Edit modal */}
+            <Modal isOpen={formOpen} onClose={() => setFormOpen(false)} title={editing ? 'Edit Service' : 'Create New Service'}>
+                <div className="space-y-4">
+                    <Input label="Service Title *" placeholder='e.g. "Expert React & System Design Interview"'
+                        value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
+                    <div>
+                        <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Description *</label>
+                        <textarea
+                            className="w-full bg-black/50 border border-neutral-800 rounded-lg px-4 py-2.5 text-white text-sm h-24 outline-none focus:border-[#7B2CBF] resize-none"
+                            placeholder="Describe what you'll evaluate and your approach..."
+                            value={form.description}
+                            onChange={e => setForm({ ...form, description: e.target.value })}
+                        />
+                    </div>
+                    <Input label="Skills (comma separated)" placeholder="React, TypeScript, System Design"
+                        value={form.skills} onChange={e => setForm({ ...form, skills: e.target.value })} />
+                    <div className="grid grid-cols-2 gap-4">
+                        <Input label="Price ($) *" type="number" placeholder="150"
+                            value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} />
+                        <div>
+                            <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Duration</label>
+                            <select className="w-full bg-black/50 border border-neutral-800 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-[#7B2CBF]"
+                                value={form.durationMinutes} onChange={e => setForm({ ...form, durationMinutes: e.target.value })}>
+                                <option value="30">30 minutes</option>
+                                <option value="45">45 minutes</option>
+                                <option value="60">60 minutes</option>
+                                <option value="90">90 minutes</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-3 pt-2 border-t border-neutral-800">
+                        <Button variant="ghost" onClick={() => setFormOpen(false)}>Cancel</Button>
+                        <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : editing ? 'Save Changes' : 'Publish Service'}</Button>
+                    </div>
+                </div>
+            </Modal>
+        </div>
+    );
+};
+

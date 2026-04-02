@@ -39,7 +39,9 @@ interface InterviewData {
     status: string;
     candidateId: { _id: string; name: string; email: string; profilePicture?: string };
     recruiterId: { _id: string; name: string; email: string; profilePicture?: string };
+    interviewerId?: { _id: string; name: string; email: string; profilePicture?: string };
     jobId?: { _id: string; title: string; company: string };
+    isUserHost?: boolean; // Server-computed authoritative host flag
 }
 
 // ==============================
@@ -221,10 +223,19 @@ const InterviewRoom: React.FC = () => {
     // Queue of peers received via room-users BEFORE admission was confirmed
     const pendingPeersRef = useRef<PeerUser[]>([]);
 
+    // Stable ref for host status — socket closures read this directly (no stale closure risk)
+    const isHostRef = useRef(false);
+
     // User info
     const userString = localStorage.getItem('user');
     const user = userString ? JSON.parse(userString) : null;
-    const isRecruiter = user?.role === 'RECRUITER' || user?.role === 'recruiter' || user?.role === 'organization';
+    // Primary: use server-computed isUserHost from the interview document.
+    // Fallback: role-based check so UI renders correctly before interview loads.
+    const roleBasedIsHost = user?.role === 'RECRUITER' || user?.role === 'recruiter' || user?.role === 'organization' || user?.role === 'FREELANCER' || user?.role === 'freelancer';
+    const isRecruiter = interview?.isUserHost ?? roleBasedIsHost;
+
+    // Keep isHostRef in sync with the derived isRecruiter value on every render
+    isHostRef.current = isRecruiter;
 
     // ===========================
     // Proctoring Hook (Candidate only)
@@ -263,6 +274,7 @@ const InterviewRoom: React.FC = () => {
         const fetchInterview = async () => {
             try {
                 const data = await apiRequest(`/interviews/${id}`);
+                console.log('[InterviewRoom] Interview loaded. isUserHost =', data.isUserHost, '| role =', user?.role, '| userId =', user?._id || user?.id);
                 setInterview(data);
                 
                 // Personalize the welcome message based on fetched candidate data
@@ -385,6 +397,17 @@ const InterviewRoom: React.FC = () => {
         };
 
         const initRoom = async () => {
+            // Determine host status NOW (synchronously) using the server flag.
+            // This MUST happen before io() connects so admittedRef is set before any socket event fires.
+            const isHost = interview.isUserHost === true || roleBasedIsHost;
+            console.log('[InterviewRoom] initRoom: isHost =', isHost, '| interview.isUserHost =', interview.isUserHost, '| roleBasedIsHost =', roleBasedIsHost);
+
+            if (isHost) {
+                admittedRef.current = true;
+                isHostRef.current = true;
+                console.log('[InterviewRoom] ✅ Host confirmed — admittedRef set BEFORE socket connects.');
+            }
+
             // 1. Get local media stream
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
@@ -400,11 +423,6 @@ const InterviewRoom: React.FC = () => {
                 localStreamRef.current = new MediaStream();
             }
 
-            // Recruiters are already considered admitted — they bypass the waiting room
-            if (isRecruiter) {
-                admittedRef.current = true;
-            }
-
             // 2. Connect to Socket.IO
             const socket = io('/', {
                 auth: { token, userName: user?.name },
@@ -415,16 +433,24 @@ const InterviewRoom: React.FC = () => {
             socket.on('connect', () => {
                 if (!isMounted) return;
                 addToast('info', 'Connected to interview server');
+                console.log('[InterviewRoom] Emitting join-room. meetingId =', interview.meetingId, '| sending role:', isHost ? 'host' : (user?.role || 'CANDIDATE'));
                 socket.emit('join-room', {
                     roomId: interview.meetingId,
                     userId: user?._id || user?.id,
                     userName: user?.name || 'Unknown User',
-                    role: user?.role,
+                    role: isHost ? 'host' : (user?.role || 'CANDIDATE'),
                 });
             });
 
             socket.on('waiting-for-host', () => {
                 if (!isMounted) return;
+                // ABSOLUTE guard: if we know we're the host, never show waiting screen.
+                if (isHostRef.current) {
+                    console.warn('[InterviewRoom] ⚠️ Got waiting-for-host but isHostRef=true — forcing admit, ignoring event.');
+                    admittedRef.current = true;
+                    setIsWaitingForHost(false);
+                    return;
+                }
                 setIsWaitingForHost(true);
             });
 
@@ -572,7 +598,7 @@ const InterviewRoom: React.FC = () => {
                     roomId: interview.meetingId,
                     userId: user?._id || user?.id,
                     userName: user?.name || 'Unknown User',
-                    role: user?.role,
+                    role: isHostRef.current ? 'host' : (user?.role || 'CANDIDATE'),
                 });
                 socket.emit('request-editor-state', { roomId: interview.meetingId });
             });

@@ -123,9 +123,15 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
             return;
         }
 
+        const scheduledDateObj = new Date(`${formData.scheduledDate}T${formData.scheduledTime}`);
+        if (scheduledDateObj <= new Date()) {
+            addToast('error', 'Please select a future date and time.');
+            return;
+        }
+
         setScheduling(true);
         try {
-            const scheduledTime = new Date(`${formData.scheduledDate}T${formData.scheduledTime}`).toISOString();
+            const scheduledTime = scheduledDateObj.toISOString();
 
             await apiRequest('/interviews/schedule', 'POST', {
                 candidateId: formData.candidateId,
@@ -195,9 +201,25 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
 
     // Split interviews into upcoming vs past
     const now = new Date();
-    const upcomingInterviews = interviews.filter(
-        (i) => new Date(i.scheduledTime) >= now && i.status !== 'Cancelled'
-    );
+    
+    // Parse user from local storage to check ID
+    const userString = localStorage.getItem('user');
+    const currentUser = userString ? JSON.parse(userString) : null;
+
+    const upcomingInterviews = interviews.filter((i) => {
+        const isFuture = new Date(i.scheduledTime) >= now;
+        const isNotCancelled = i.status !== 'Cancelled';
+        
+        if (role === 'RECRUITER' && currentUser) {
+            // Hide delegated interviews (where a different interviewer is assigned)
+            const isDelegated = i.interviewerId && i.interviewerId._id && i.interviewerId._id !== String(currentUser.id || currentUser._id);
+            if (isDelegated) return false;
+            // Also hide strictly pending bookings since they aren't finalized
+            if (i.status === 'Pending') return false; 
+        }
+        
+        return isFuture && isNotCancelled;
+    });
     const pastInterviews = interviews.filter(
         (i) => new Date(i.scheduledTime) < now || i.status === 'Cancelled' || i.status === 'Completed'
     );
@@ -436,6 +458,7 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                         <Input
                             label="Date *"
                             type="date"
+                            min={new Date().toLocaleDateString('en-CA')}
                             value={formData.scheduledDate}
                             onChange={(e) => setFormData({ ...formData, scheduledDate: e.target.value })}
                         />

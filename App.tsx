@@ -8,10 +8,10 @@ import { AdminOverview, AdminUsers, AdminJobs, AdminApprovals } from './pages/Ad
 import { OrgAdminDashboard, OrgSettings } from './pages/OrgAdmin';
 import { OrgTeam } from './pages/OrgTeam';
 import { OrgJobsList } from './pages/OrgJobsList'; // Company Jobs Module
-import { RecruiterDashboard, CreateJob, MyJobs, Applicants, RecruiterProfile, FindInterviewers, RecruiterInterviews } from './pages/Recruiter';
+import { RecruiterDashboard, CreateJob, MyJobs, Applicants, RecruiterProfile, FindInterviewers, RecruiterInterviews, ServiceMarketplace } from './pages/Recruiter';
 import { RankedCandidates } from './pages/RankedCandidates';
 import { CandidateDashboard, CandidateJobs, CandidateProfile, CandidateInterviews, CandidateApplications } from './pages/Candidate';
-import { InterviewerDashboard, InterviewerProfile, InterviewerInterviews, InterviewerRequests } from './pages/Interviewer';
+import { InterviewerDashboard, InterviewerProfile, InterviewerInterviews, InterviewerRequests, FreelancerServiceManager } from './pages/Interviewer';
 import InterviewRoom from './pages/InterviewRoom';
 import CodingTestPage from './pages/CodingTestPage';
 import AdaptiveResultReview from './pages/AdaptiveResultReview';
@@ -60,7 +60,7 @@ const App: React.FC = () => {
             <Route path="dashboard" element={<RecruiterDashboard />} />
             <Route path="jobs" element={<MyJobs />} />
             <Route path="applicants" element={<Applicants />} />
-            <Route path="hire-interviewer" element={<FindInterviewers />} />
+            <Route path="hire-interviewer" element={<ServiceMarketplace />} />
             <Route path="schedule" element={<RecruiterInterviews />} />
             <Route path="profile" element={<RecruiterProfile />} />
             <Route path="ranked/:jobId" element={<RankedCandidates />} />
@@ -82,6 +82,7 @@ const App: React.FC = () => {
           <Route path="/interviewer" element={<DashboardLayout role="INTERVIEWER" />}>
             <Route index element={<InterviewerDashboard />} />
             <Route path="gigs" element={<FreelancerGigBoard />} />
+            <Route path="services" element={<FreelancerServiceManager />} />
             <Route path="schedule" element={<InterviewerInterviews />} />
             <Route path="requests" element={<InterviewerRequests />} />
             <Route path="profile" element={<InterviewerProfile />} />

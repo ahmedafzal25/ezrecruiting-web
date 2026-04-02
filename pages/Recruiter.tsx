@@ -17,6 +17,7 @@ const convertToBase64 = (file: File): Promise<string> => {
 
 import { ApplicantReviewModal } from '../components/ApplicantReviewModal';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
+import { FreelancerPublicProfileModal } from '../components/FreelancerPublicProfileModal';
 
 export const RecruiterDashboard: React.FC = () => {
     const [stats, setStats] = useState({ jobs: 0, applicants: 0, interviews: 0, pipeline: { Applied: 0, Screening: 0, Interview: 0, Offer: 0, Rejected: 0 } });
@@ -869,3 +870,340 @@ export const RecruiterProfile: React.FC = () => {
 };
 
 export const RecruiterInterviews: React.FC = () => <InterviewsTab role="RECRUITER" />;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVICE MARKETPLACE
+// Fiverr-style grid of freelancer interview services
+// ─────────────────────────────────────────────────────────────────────────────
+interface FreelancerService {
+    _id: string;
+    title: string;
+    description: string;
+    skills: string[];
+    price: number;
+    durationMinutes: number;
+    isActive: boolean;
+    freelancerId: {
+        _id: string;
+        name: string;
+        profilePicture?: string;
+        averageRating?: number;
+        bio?: string;
+    };
+    createdAt: string;
+}
+
+export const ServiceMarketplace: React.FC = () => {
+    const [services, setServices] = useState<FreelancerService[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    // Filters
+    const [skillFilter, setSkillFilter] = useState('');
+    const [maxPrice, setMaxPrice] = useState(500);
+
+    // Profile View modal
+    const [viewProfileId, setViewProfileId] = useState<string | null>(null);
+
+    // Booking modal
+    const [selected, setSelected] = useState<FreelancerService | null>(null);
+    const [jobs, setJobs] = useState<any[]>([]);
+    const [candidates, setCandidates] = useState<any[]>([]);
+    
+    // Explicit state variables for the required backend payload
+    const [selectedCandidateId, setSelectedCandidateId] = useState('');
+    const [selectedJobId, setSelectedJobId] = useState('');
+    const [scheduledDate, setScheduledDate] = useState('');
+    const [scheduledTime, setScheduledTime] = useState('');
+    const [bookingNotes, setBookingNotes] = useState('');
+    
+    const [bookingLoading, setBookingLoading] = useState(false);
+
+    const fetchServices = async () => {
+        setLoading(true);
+        try {
+            const params = new URLSearchParams();
+            if (skillFilter.trim()) params.append('skill', skillFilter.trim());
+            if (maxPrice < 500) params.append('maxPrice', maxPrice.toString());
+            const data = await apiRequest(`/recruiter/services?${params.toString()}`);
+            setServices(data);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchServices();
+        apiRequest('/jobs/my-jobs').then(setJobs).catch(console.error);
+        apiRequest('/interviews/eligible-candidates').then(setCandidates).catch(console.error);
+    }, []);
+
+    const handleBook = async () => {
+        if (!selected || !selectedCandidateId || !scheduledDate || !scheduledTime) {
+            alert('Please fill in candidate name and details (Date, and Time).');
+            return;
+        }
+        const fullScheduledTime = new Date(`${scheduledDate}T${scheduledTime}`);
+        if (fullScheduledTime <= new Date()) { alert('Please select a future date and time.'); return; }
+
+        setBookingLoading(true);
+        try {
+            const result = await apiRequest(`/recruiter/services/${selected._id}/book`, 'POST', {
+                candidateId:   selectedCandidateId,
+                jobId:         selectedJobId || undefined,
+                scheduledTime: fullScheduledTime.toISOString(),
+                notes:         bookingNotes,
+            });
+            alert(`✅ Interview booked! Meeting ID: ${result.interview.meetingId}`);
+            setSelected(null);
+            
+            // Reset state
+            setSelectedCandidateId('');
+            setSelectedJobId('');
+            setScheduledDate('');
+            setScheduledTime('');
+            setBookingNotes('');
+        } catch (err: any) {
+            alert(err.message || 'Failed to book service');
+        } finally {
+            setBookingLoading(false);
+        }
+    };
+
+    const nowLocal = new Date();
+    const minDate = nowLocal.toISOString().slice(0, 10);
+    const minTime = scheduledDate === minDate
+        ? `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}`
+        : undefined;
+
+    const renderStars = (rating: number = 0) => {
+        const full = Math.floor(rating);
+        return Array.from({ length: 5 }, (_, i) => (
+            <Star key={i} size={12} className={i < full ? 'text-yellow-400 fill-yellow-400' : 'text-neutral-600'} />
+        ));
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div>
+                <h2 className="text-2xl font-bold">Freelancer Marketplace</h2>
+                <p className="text-neutral-400 text-sm mt-1">Book expert interviewers for your candidates — instantly.</p>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="flex flex-col md:flex-row gap-4 bg-neutral-900 border border-neutral-800 rounded-xl p-5 items-end">
+                <div className="flex-1">
+                    <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Filter by Skill</label>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-2.5 text-neutral-500 w-4 h-4 pointer-events-none" />
+                        <input
+                            className="w-full bg-black/50 border border-neutral-800 rounded-lg pl-9 pr-4 py-2.5 text-white text-sm focus:border-[#7B2CBF] outline-none transition-colors"
+                            placeholder="e.g. React, System Design, Node.js"
+                            value={skillFilter}
+                            onChange={e => setSkillFilter(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && fetchServices()}
+                        />
+                    </div>
+                </div>
+                <div className="w-full md:w-72">
+                    <div className="flex justify-between mb-2">
+                        <label className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Max Price</label>
+                        <span className="text-sm font-bold text-[#7B2CBF]">{maxPrice >= 500 ? 'Any' : `$${maxPrice}`}</span>
+                    </div>
+                    <input type="range" min="20" max="500" step="10" value={maxPrice}
+                        onChange={e => setMaxPrice(Number(e.target.value))}
+                        className="w-full accent-[#7B2CBF]" />
+                </div>
+                <Button onClick={fetchServices} className="h-[42px] px-8">Search</Button>
+            </div>
+
+            {/* Results count */}
+            {!loading && (
+                <p className="text-sm text-neutral-500">{services.length} service{services.length !== 1 ? 's' : ''} available</p>
+            )}
+
+            {/* Service Grid */}
+            {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="h-64 bg-neutral-900 border border-neutral-800 rounded-xl animate-pulse" />
+                    ))}
+                </div>
+            ) : services.length === 0 ? (
+                <div className="text-center py-20 border border-neutral-800 rounded-xl">
+                    <Briefcase size={48} className="text-neutral-700 mx-auto mb-4" />
+                    <p className="text-neutral-500 text-lg font-medium">No services found</p>
+                    <p className="text-neutral-600 text-sm mt-1">Try adjusting your skill filter or price range</p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {services.map(svc => (
+                        <div key={svc._id}
+                            className="group flex flex-col bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden hover:border-[#7B2CBF]/50 transition-all duration-200 hover:shadow-lg hover:shadow-purple-900/20"
+                        >
+                            {/* Freelancer header */}
+                            <div className="p-5 border-b border-neutral-800/70 flex items-center gap-3">
+                                <img
+                                    src={svc.freelancerId.profilePicture || '/assets/default-avatar.png'}
+                                    alt={svc.freelancerId.name}
+                                    className="w-11 h-11 rounded-full object-cover border-2 border-[#7B2CBF]/30"
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-semibold text-white text-sm truncate">{svc.freelancerId.name}</p>
+                                    <div className="flex items-center gap-1 mt-0.5">
+                                        {renderStars(svc.freelancerId.averageRating)}
+                                        <span className="text-xs text-neutral-500 ml-1">
+                                            {svc.freelancerId.averageRating?.toFixed(1) || 'New'}
+                                        </span>
+                                    </div>
+                                    <button 
+                                        onClick={() => setViewProfileId(svc.freelancerId._id)}
+                                        className="text-[11px] text-[#9D4EDD] hover:text-[#c8b6ff] mt-1 text-left"
+                                    >
+                                        View Profile
+                                    </button>
+                                </div>
+                                <Badge variant="neutral" className="text-[10px] px-2 bg-[#7B2CBF]/10 text-[#9D4EDD] border-[#7B2CBF]/20">
+                                    {svc.durationMinutes} min
+                                </Badge>
+                            </div>
+
+                            {/* Service body */}
+                            <div className="flex-1 p-5 space-y-3">
+                                <h3 className="font-bold text-white text-base leading-snug line-clamp-2 group-hover:text-[#9D4EDD] transition-colors">
+                                    {svc.title}
+                                </h3>
+                                <p className="text-sm text-neutral-400 line-clamp-2 leading-relaxed">
+                                    {svc.description}
+                                </p>
+                                {svc.skills.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {svc.skills.slice(0, 4).map((sk, i) => (
+                                            <span key={i} className="text-[10px] px-2 py-0.5 bg-neutral-800 text-neutral-300 rounded-full border border-neutral-700">
+                                                {sk}
+                                            </span>
+                                        ))}
+                                        {svc.skills.length > 4 && (
+                                            <span className="text-[10px] px-2 py-0.5 bg-neutral-800 text-neutral-500 rounded-full">
+                                                +{svc.skills.length - 4}
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Footer: price + CTA */}
+                            <div className="p-5 pt-0 flex items-center justify-between">
+                                <div>
+                                    <span className="text-2xl font-black text-white">${svc.price}</span>
+                                    <span className="text-xs text-neutral-500 ml-1">/ session</span>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    onClick={() => { 
+                                        setSelected(svc); 
+                                        setSelectedCandidateId('');
+                                        setSelectedJobId('');
+                                        setScheduledDate('');
+                                        setScheduledTime('');
+                                        setBookingNotes('');
+                                    }}
+                                    className="bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] hover:from-[#9D4EDD] hover:to-[#7B2CBF] text-white"
+                                >
+                                    Book Interview
+                                </Button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Booking Modal */}
+            <Modal isOpen={!!selected} onClose={() => setSelected(null)} title={`Book: ${selected?.title}`}>
+                {selected && (
+                    <div className="space-y-5">
+                        {/* Service summary */}
+                        <div className="flex items-center gap-3 p-4 bg-neutral-900 rounded-xl border border-neutral-800">
+                            <img
+                                src={selected.freelancerId.profilePicture || '/assets/default-avatar.png'}
+                                className="w-12 h-12 rounded-full object-cover border-2 border-[#7B2CBF]/30"
+                                alt={selected.freelancerId.name}
+                            />
+                            <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-white">{selected.freelancerId.name}</p>
+                                <p className="text-xs text-neutral-400 truncate">{selected.title}</p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                                <p className="text-xl font-black text-white">${selected.price}</p>
+                                <p className="text-[10px] text-neutral-500">{selected.durationMinutes} min</p>
+                            </div>
+                        </div>
+
+                        {/* Candidate & Job selectors */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">
+                                    Candidate <span className="text-red-400">*</span>
+                                </label>
+                                <select
+                                    className="w-full bg-black/50 border border-neutral-800 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-[#7B2CBF]"
+                                    value={selectedCandidateId}
+                                    onChange={e => setSelectedCandidateId(e.target.value)}
+                                >
+                                    <option value="">Select candidate</option>
+                                    {candidates.map(c => <option key={c._id || c.id} value={c._id || c.id}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Job (Optional)</label>
+                                <select
+                                    className="w-full bg-black/50 border border-neutral-800 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-[#7B2CBF]"
+                                    value={selectedJobId}
+                                    onChange={e => setSelectedJobId(e.target.value)}
+                                >
+                                    <option value="">Select job</option>
+                                    {jobs.map(j => <option key={j._id || j.id} value={j._id || j.id}>{j.title}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Date & Time */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <Input label="Date *" type="date" min={minDate}
+                                value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
+                            <Input label="Time *" type="time" min={minTime}
+                                value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} />
+                        </div>
+
+                        {/* Notes */}
+                        <div>
+                            <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Notes for Interviewer</label>
+                            <textarea
+                                className="w-full bg-black/50 border border-neutral-800 rounded-lg px-4 py-2.5 text-white text-sm h-20 outline-none focus:border-[#7B2CBF] resize-none"
+                                placeholder="What should the interviewer focus on? (e.g. system design, coding, behavioral)"
+                                value={bookingNotes}
+                                onChange={e => setBookingNotes(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="flex justify-end gap-3 pt-1 border-t border-neutral-800">
+                            <Button variant="ghost" onClick={() => setSelected(null)}>Cancel</Button>
+                            <Button onClick={handleBook} disabled={bookingLoading}>
+                                {bookingLoading ? 'Booking...' : `Confirm & Book — $${selected.price}`}
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
+
+            {/* Public Profile View Modal */}
+            <FreelancerPublicProfileModal 
+                freelancerId={viewProfileId} 
+                onClose={() => setViewProfileId(null)} 
+            />
+        </div>
+    );
+};
+

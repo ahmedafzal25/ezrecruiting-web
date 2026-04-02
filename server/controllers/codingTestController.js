@@ -12,6 +12,9 @@ const TestSession    = require('../models/TestSession');
 const CodingQuestion = require('../models/CodingQuestion');
 const { getNextTarget, pickQuestion } = require('../utils/adaptiveEngine');
 
+// Roles that can conduct/manage an interview session (mirrors codingTestRoutes.js)
+const HOST_ROLES = ['RECRUITER', 'ADMIN', 'ORG_ADMIN', 'organization', 'INTERVIEWER', 'freelancer'];
+
 // ── Configuration ─────────────────────────────────────────────────────────────
 // No fixed question limit — the test continues until the recruiter ends it.
 const MAX_QUESTIONS    = 999; // Practically infinite
@@ -115,6 +118,33 @@ const runAllTestCases = (code, testCases) => {
   } finally {
     try { fs.unlinkSync(tmpFile); } catch (_) { /* already deleted — ignore */ }
   }
+};
+
+/**
+ * Asynchronous wrapper to execute Python code for a single input
+ * (Used for the new dynamic scoring continuous loop)
+ */
+const executePython = (code, input) => {
+  return new Promise((resolve) => {
+    const tmpFile = path.join(
+      os.tmpdir(),
+      `procruit_exec_${Date.now()}_${Math.random().toString(36).slice(2)}.py`
+    );
+    try {
+      fs.writeFileSync(tmpFile, code, 'utf8');
+      const actualOutput = execSync(`python "${tmpFile}"`, {
+        input: input || '',
+        timeout: EXEC_TIMEOUT_MS,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      resolve(actualOutput);
+    } catch (err) {
+      resolve((err.stderr || err.message || '').trimEnd());
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
+    }
+  });
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -469,28 +499,49 @@ const submitAnswer = async (req, res) => {
       `(${question.difficulty}/${question.category}) — ` +
       `${question.visibleTestCases.length} visible, ${question.hiddenTestCases.length} hidden`);
 
-    // ── PASS 1: Visible test cases ───────────────────────────────────────────
-    // Results are returned to the frontend so the candidate gets feedback.
-    // Actual output IS exposed here — these are the public test cases.
-    const visibleResults = runAllTestCases(submittedCode, question.visibleTestCases);
-    const visibleResultsForClient = question.visibleTestCases.map((tc, i) => ({
-      input:          tc.input,
-      expectedOutput: tc.expectedOutput,
-      actualOutput:   visibleResults[i].actualOutput,
-      passed:         visibleResults[i].passed,
-      errorType:      visibleResults[i].errorType,
-    }));
+    // ── PASS 1 & 2: All test cases combined (scoring) ─────────────────────────
+    const allTestCases = [...question.visibleTestCases, ...question.hiddenTestCases];
+    let passedCases = 0;
+    const totalCases = allTestCases.length;
+    
+    const visibleResultsForClient = [];
+    const hiddenTotal = question.hiddenTestCases.length;
+    let hiddenPassed = 0;
+    let currentIndex = 0;
 
-    // ── PASS 2: Hidden test cases (scoring) ──────────────────────────────
-    // Actual outputs are never included in the API response.
-    const hiddenResults   = runAllTestCases(submittedCode, question.hiddenTestCases);
-    const hiddenPassed    = hiddenResults.filter(r => r.passed).length;
-    const hiddenTotal     = hiddenResults.length;
+    // Loop through all cases. DO NOT use 'break' or 'return' inside the loop.
+    for (const tc of allTestCases) {
+        // Construct temporary Python string that combines code with a hidden execution block
+        const functionCall = `print(${question.functionName}(${tc.input}))`;
+        const executableCode = `${submittedCode}\n\n${functionCall}`;
+        
+        // Run without any stdin payload
+        const output = await executePython(executableCode);
+        const isMatch = output.trim() === tc.expectedOutput.trim();
+        
+        if (isMatch) {
+            passedCases++;
+            if (currentIndex >= question.visibleTestCases.length) hiddenPassed++;
+        }
 
-    // Score = percentage of hidden test cases passed
-    const testScore = hiddenTotal > 0 ? Math.round((hiddenPassed / hiddenTotal) * 100) : 0;
-    // "Pass" requires 100% of hidden cases to succeed
-    const passed = hiddenPassed === hiddenTotal && hiddenTotal > 0;
+        if (currentIndex < question.visibleTestCases.length) {
+             visibleResultsForClient.push({
+                input: tc.input,
+                expectedOutput: tc.expectedOutput,
+                actualOutput: output.trim(),
+                passed: isMatch,
+                errorType: isMatch ? null : classifyError(output),
+            });
+        }
+        currentIndex++;
+    }
+
+    const testCaseScore = totalCases > 0 ? (passedCases / totalCases) * 100 : 0; // Exact percentage
+
+    // Score = percentage of all test cases passed for dynamic grading
+    const testScore = Math.round(testCaseScore);
+    // "Pass" logic is up to interpretation, traditionally 100%
+    const passed = passedCases === totalCases && totalCases > 0;
 
     // AI Logic Analysis
     const aiAnalysis = await analyzeCodeWithAI(submittedCode, testScore);
@@ -571,8 +622,8 @@ const getResult = async (req, res) => {
     const userId = req.user._id.toString();
     const role   = req.user.role;
 
-    const isOwner    = session.candidateId?._id?.toString() === userId;
-    const isPrivileged = ['RECRUITER', 'ADMIN', 'organization'].includes(role);
+    const isOwner      = session.candidateId?._id?.toString() === userId;
+    const isPrivileged = HOST_ROLES.includes(role);
 
     if (!isOwner && !isPrivileged) {
       return res.status(403).json({ message: 'Not authorized to view this result' });
@@ -601,7 +652,7 @@ const getSessionByCandidateAndJob = async (req, res) => {
 
     // Validate role
     const role = req.user.role;
-    const isPrivileged = ['RECRUITER', 'ADMIN', 'organization'].includes(role);
+    const isPrivileged = HOST_ROLES.includes(role);
     if (!isPrivileged) return res.status(403).json({ message: 'Not authorized' });
 
     return res.json(session);
@@ -623,11 +674,11 @@ const endSession = async (req, res) => {
     const session = await TestSession.findById(req.params.sessionId);
     if (!session) return res.status(404).json({ message: 'Session not found' });
 
-    // Only privileged roles can end a session
+    // Only host roles can end a session (recruiter, org admin, or assigned interviewer/freelancer)
     const role = req.user.role;
-    const isPrivileged = ['RECRUITER', 'ADMIN', 'ORG_ADMIN', 'organization'].includes(role);
+    const isPrivileged = HOST_ROLES.includes(role);
     if (!isPrivileged) {
-      return res.status(403).json({ message: 'Only the recruiter or admin can end a test session' });
+      return res.status(403).json({ message: 'Only a host (recruiter, admin, or assigned interviewer) can end a test session' });
     }
 
     if (session.status === 'completed') {

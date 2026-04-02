@@ -185,7 +185,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
     { name: 'Dashboard', path: '/recruiter', icon: LayoutDashboard },
     { name: 'Jobs', path: '/recruiter/jobs', icon: Briefcase },
     { name: 'Applicants', path: '/recruiter/applicants', icon: Users },
-    { name: 'Hire Interviewer', path: '/recruiter/hire-interviewer', icon: Video },
+    { name: 'Service Marketplace', path: '/recruiter/hire-interviewer', icon: Video },
     { name: 'Schedule', path: '/recruiter/schedule', icon: Calendar },
     { name: 'Profile', path: '/recruiter/profile', icon: User },
   ];
@@ -200,7 +200,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
 
   const interviewerLinks: SidebarItem[] = [
     { name: 'Dashboard', path: '/interviewer', icon: LayoutDashboard },
-    { name: 'Find Gigs', path: '/interviewer/gigs', icon: Briefcase },
+    { name: 'My Services', path: '/interviewer/services', icon: Video },
     { name: 'My Schedule', path: '/interviewer/schedule', icon: Calendar },
     { name: 'Requests', path: '/interviewer/requests', icon: MessageSquare },
     { name: 'My Profile', path: '/interviewer/profile', icon: User },

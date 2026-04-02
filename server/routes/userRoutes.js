@@ -56,9 +56,9 @@ router.put('/profile', verifyToken, async (req, res) => {
     try {
         const {
             firstName, lastName, profilePicture, // User fields
-            headline, bio, skills, experience, education, resume, // Candidate Profile fields
+            headline, bio, skills, experience, projects, education, resume, // Candidate & Freelancer fields
             hourlyRate, yearsOfExperience, availability, // Interviewer Profile fields
-            website, description // Org fields (if we want to update org here, but usually separate)
+            website, description // Org fields
         } = req.body;
 
         // 1. Update User Fields
@@ -67,6 +67,10 @@ router.put('/profile', verifyToken, async (req, res) => {
         if (lastName) userUpdate.lastName = lastName;
         if (firstName || lastName) userUpdate.name = `${firstName || ''} ${lastName || ''}`.trim();
         if (profilePicture) userUpdate.profilePicture = profilePicture;
+        
+        // Trust & Verification layer array updates directly on User model
+        if (experience !== undefined) userUpdate.experience = experience;
+        if (projects !== undefined) userUpdate.projects = projects;
 
         const user = await User.findByIdAndUpdate(
             req.user.id,
@@ -80,7 +84,6 @@ router.put('/profile', verifyToken, async (req, res) => {
             if (headline !== undefined) profileUpdate.headline = headline;
             if (bio !== undefined) profileUpdate.bio = bio;
             if (skills !== undefined) profileUpdate.skills = skills;
-            if (experience !== undefined) profileUpdate.experience = experience;
             if (education !== undefined) profileUpdate.education = education;
             if (resume !== undefined) profileUpdate.resume = resume;
 
