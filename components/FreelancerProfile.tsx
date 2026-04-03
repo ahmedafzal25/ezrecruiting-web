@@ -30,7 +30,17 @@ export const FreelancerProfile: React.FC = () => {
                     setHourlyRate(data.hourlyRate || '');
                     setSkills(data.skills || []);
                     
-                    setExperience(data.experience?.length ? data.experience : [{ title: '', company: '', startDate: '', endDate: '', description: '' }]);
+                    if (data.experience && data.experience.length > 0) {
+                        const formattedExperience = data.experience.map((exp: any) => ({
+                            ...exp,
+                            startDate: exp.startDate ? exp.startDate.split('T')[0] : '',
+                            endDate: exp.endDate ? exp.endDate.split('T')[0] : ''
+                        }));
+                        setExperience(formattedExperience);
+                    } else {
+                        setExperience([{ title: '', company: '', startDate: '', endDate: '', description: '' }]);
+                    }
+                    
                     setProjects(data.projects?.length ? data.projects : [{ title: '', role: '', link: '', description: '' }]);
                 }
             } catch (err) {
@@ -67,15 +77,23 @@ export const FreelancerProfile: React.FC = () => {
 
         // Validate Experience logic
         for (const exp of experience) {
-            if (exp.startDate) {
-                if (new Date(exp.startDate) > new Date()) {
-                    addToast('error', 'Start date cannot be in the future.');
-                    return;
-                }
-                if (exp.endDate && new Date(exp.endDate) < new Date(exp.startDate)) {
-                    addToast('error', 'End date cannot be before the start date.');
-                    return;
-                }
+            if (!exp.startDate) {
+                addToast('error', 'Start date is required for all experience entries.');
+                return;
+            }
+
+            const start = new Date(exp.startDate);
+            const end = exp.endDate ? new Date(exp.endDate) : null;
+            const today = new Date();
+
+            if (start > today) {
+                addToast('error', 'Work experience start date cannot be in the future.');
+                return;
+            }
+
+            if (end && start > end) {
+                addToast('error', 'Start date cannot be after the end date.');
+                return;
             }
         }
 

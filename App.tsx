@@ -11,7 +11,7 @@ import { OrgJobsList } from './pages/OrgJobsList'; // Company Jobs Module
 import { RecruiterDashboard, CreateJob, MyJobs, Applicants, RecruiterProfile, FindInterviewers, RecruiterInterviews, ServiceMarketplace } from './pages/Recruiter';
 import { RankedCandidates } from './pages/RankedCandidates';
 import { CandidateDashboard, CandidateJobs, CandidateProfile, CandidateInterviews, CandidateApplications } from './pages/Candidate';
-import { InterviewerDashboard, InterviewerProfile, InterviewerInterviews, InterviewerRequests, FreelancerServiceManager } from './pages/Interviewer';
+import { InterviewerDashboard, InterviewerProfile, InterviewerInterviews, InterviewerRequests, FreelancerServiceManager, DelegatedProjects, InterviewerApplicants } from './pages/Interviewer';
 import InterviewRoom from './pages/InterviewRoom';
 import CodingTestPage from './pages/CodingTestPage';
 import AdaptiveResultReview from './pages/AdaptiveResultReview';
@@ -83,6 +83,8 @@ const App: React.FC = () => {
             <Route index element={<InterviewerDashboard />} />
             <Route path="gigs" element={<FreelancerGigBoard />} />
             <Route path="services" element={<FreelancerServiceManager />} />
+            <Route path="projects" element={<DelegatedProjects />} />
+            <Route path="pipeline" element={<InterviewerApplicants />} />
             <Route path="schedule" element={<InterviewerInterviews />} />
             <Route path="requests" element={<InterviewerRequests />} />
             <Route path="profile" element={<InterviewerProfile />} />

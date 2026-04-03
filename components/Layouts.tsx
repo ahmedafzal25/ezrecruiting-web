@@ -201,6 +201,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
   const interviewerLinks: SidebarItem[] = [
     { name: 'Dashboard', path: '/interviewer', icon: LayoutDashboard },
     { name: 'My Services', path: '/interviewer/services', icon: Video },
+    { name: 'Delegated Projects', path: '/interviewer/projects', icon: Briefcase },
     { name: 'My Schedule', path: '/interviewer/schedule', icon: Calendar },
     { name: 'Requests', path: '/interviewer/requests', icon: MessageSquare },
     { name: 'My Profile', path: '/interviewer/profile', icon: User },
