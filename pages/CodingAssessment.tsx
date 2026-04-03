@@ -67,11 +67,7 @@ const CATEGORY_CONFIG: Record<string, { label: string; icon: string }> = {
 
 // No fixed question limit — questions continue until the recruiter ends the test
 
-const STARTER_CODE = `# Write your Python code here
-# Read input using: input()
-# Print output using: print()
-
-`;
+// No fixed question limit — questions continue until the recruiter ends the test
 
 // ── CodingAssessment Component ─────────────────────────────────────────────────
 const CodingAssessment: React.FC = () => {
@@ -82,7 +78,7 @@ const CodingAssessment: React.FC = () => {
   // ── Core State ────────────────────────────────────────────────────────────
   const [actualSessionId, setActualSessionId]   = useState<string | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
-  const [code, setCode]                       = useState<string>(STARTER_CODE);
+  const [code, setCode]                       = useState<string>('');
   const [consoleOutput, setConsoleOutput]      = useState<string>('🖥️ Console output will appear here after you submit your code.\n');
   const [isEvaluating, setIsEvaluating]        = useState(false);
   const [questionNumber, setQuestionNumber]    = useState(1);
@@ -159,7 +155,7 @@ const CodingAssessment: React.FC = () => {
 
       setCurrentQuestion(res.question);
       setQuestionNumber(res.questionNumber);
-      setCode(STARTER_CODE);
+      setCode(res.question.starterCode || '');
       setLastResult(null);
       setConsoleOutput('🖥️ Console output will appear here after you submit your code.\n');
       setLoading(false);
@@ -682,7 +678,7 @@ const CodingAssessment: React.FC = () => {
               {!hasSubmitted && (
                 <button
                   onClick={handleRunCode}
-                  disabled={isEvaluating || !code.trim() || code.trim() === STARTER_CODE.trim()}
+                  disabled={isEvaluating || !code.trim() || code.trim() === (currentQuestion?.starterCode || '').trim()}
                   id="submit-code-btn"
                   className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-[#7B2CBF] to-[#9D4EDD] hover:from-[#9D4EDD] hover:to-[#7B2CBF] text-white rounded-lg font-semibold text-sm transition-all duration-300 shadow-md shadow-purple-900/30 hover:shadow-purple-700/40 disabled:opacity-40 disabled:cursor-not-allowed"
                 >

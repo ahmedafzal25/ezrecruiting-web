@@ -27,7 +27,8 @@ const interviewSchema = new mongoose.Schema({
   feedback: {
     technicalScore: { type: Number, min: 0, max: 100 },
     communicationScore: { type: Number, min: 0, max: 100 },
-    detailedFeedback: { type: String }
+    detailedFeedback: { type: String },
+    recommendation: { type: String, enum: ['Strong Hire', 'Hire', 'No Hire'] }
   },
   createdAt: { type: Date, default: Date.now }
 });

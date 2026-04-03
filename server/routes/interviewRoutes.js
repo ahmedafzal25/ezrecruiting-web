@@ -83,9 +83,9 @@ router.get('/my-interviews', protect, async (req, res) => {
         }
 
         const interviews = await Interview.find(query)
-            .populate('candidateId', 'name email profilePicture')
-            .populate('recruiterId', 'name email profilePicture')
-            .populate('interviewerId', 'name email profilePicture')
+            .populate('candidateId', 'name firstName lastName email profilePicture')
+            .populate('recruiterId', 'name firstName lastName email profilePicture companyName')
+            .populate('interviewerId', 'name firstName lastName email profilePicture')
             .populate('jobId', 'title company')
             .sort({ scheduledTime: -1 });
 
@@ -128,11 +128,19 @@ router.get('/:id', protect, async (req, res) => {
         const isInterviewer = interview.interviewerId?._id?.toString() === userId || interview.interviewerId?.toString() === userId;
         const isAdmin = req.user.role === 'ADMIN';
 
+        console.log(`[Interview /:id] userId=${userId} role=${req.user.role} isRecruiter=${isRecruiter} isInterviewer=${isInterviewer} isCandidate=${isCandidate}`);
+        console.log(`[Interview /:id] recruiterId=${interview.recruiterId?._id} interviewerId=${interview.interviewerId?._id || interview.interviewerId}`);
+
         if (!isRecruiter && !isCandidate && !isInterviewer && !isAdmin) {
             return res.status(403).json({ message: 'You are not authorized to join this interview' });
         }
 
-        res.json(interview);
+        // Compute host status authoritatively on the server
+        const isUserHost = isRecruiter || isInterviewer || isAdmin;
+
+        console.log(`[Interview /:id] → isUserHost=${isUserHost}`);
+
+        res.json({ ...interview.toObject(), isUserHost });
     } catch (err) {
         console.error('Fetch interview error:', err);
         res.status(500).json({ message: 'Failed to fetch interview' });
@@ -208,9 +216,9 @@ router.delete('/:id', protect, authorize('RECRUITER'), async (req, res) => {
 });
 
 // Submit Interview Feedback
-router.post('/:id/feedback', protect, async (req, res) => {
+router.post('/:id/feedback', protect, authorize('freelancer', 'INTERVIEWER', 'ADMIN', 'RECRUITER'), async (req, res) => {
     try {
-        const { technicalScore, communicationScore, detailedFeedback } = req.body;
+        const { technicalScore, communicationScore, detailedFeedback, recommendation } = req.body;
         
         const interview = await Interview.findById(req.params.id);
         if (!interview) {
@@ -219,7 +227,7 @@ router.post('/:id/feedback', protect, async (req, res) => {
 
         // Validate user is the assigned interviewer or recruiter
         const userId = req.user._id.toString();
-        const isInterviewer = interview.interviewerId?.toString() === userId;
+        const isInterviewer = interview.interviewerId?.toString() === userId || interview.interviewerId?.toString() === req.user._id;
         const isRecruiter = interview.recruiterId.toString() === userId;
 
         if (!isInterviewer && !isRecruiter && req.user.role !== 'ADMIN') {
@@ -229,7 +237,8 @@ router.post('/:id/feedback', protect, async (req, res) => {
         interview.feedback = {
             technicalScore: Number(technicalScore),
             communicationScore: Number(communicationScore),
-            detailedFeedback
+            detailedFeedback,
+            recommendation
         };
         interview.status = 'Completed';
 

@@ -5,6 +5,7 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const connectDB = require('./config/db');
+const Interview = require('./models/Interview');
 
 // Import Routes
 const authRoutes = require('./routes/authRoutes');
@@ -17,6 +18,7 @@ const applicationRoutes = require('./routes/applicationRoutes');
 const organizationRoutes = require('./routes/organizationRoutes');
 const codingTestRoutes   = require('./routes/codingTestRoutes');
 const freelancerRoutes   = require('./routes/freelancerRoutes');
+const recruiterServiceRoutes = require('./routes/recruiterServiceRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -60,6 +62,7 @@ app.use('/api/applications', applicationRoutes);
 app.use('/api/organization', organizationRoutes);
 app.use('/api/coding-test', codingTestRoutes);
 app.use('/api/freelancers', freelancerRoutes);
+app.use('/api/recruiter',   recruiterServiceRoutes);
 
 app.get('/', (req, res) => {
   res.send('API is running...');
@@ -105,19 +108,45 @@ io.on('connection', (socket) => {
   // Helper: checks if a role string is a host (recruiter or org admin)
   const isHostRole = (role) =>
     role === 'RECRUITER' || role === 'recruiter' ||
-    role === 'organization';
+    role === 'organization' || role === 'host' || 
+    role === 'FREELANCER' || role === 'freelancer';
 
   // --- Join Interview Room ---
   // Accepts: plain roomId string OR { roomId, userName, role } object
-  socket.on('join-room', (payload) => {
+  socket.on('join-room', async (payload) => {
     // Support both legacy string and new object payload
     const interviewId = typeof payload === 'string' ? payload : payload?.roomId;
     if (!interviewId) return;
+
+    let joiningUserId = socket.userId;
 
     // Allow client to override auth-derived values (useful for richer notifications)
     if (typeof payload === 'object') {
       if (payload.userName) socket.userName = payload.userName;
       if (payload.role) socket.userRole = payload.role;
+      if (payload.userId) joiningUserId = payload.userId;
+    }
+
+    try {
+      const interview = await Interview.findOne({ meetingId: interviewId });
+      if (interview) {
+        if (
+          (interview.recruiterId && joiningUserId === interview.recruiterId.toString()) ||
+          (interview.interviewerId && joiningUserId === interview.interviewerId.toString()) ||
+          (interview.candidateId && joiningUserId === interview.candidateId.toString() && socket.userRole !== 'FREELANCER') // Just to be safe
+        ) {
+            // DB check passed.
+        }
+        
+        if (
+          (interview.recruiterId && joiningUserId === interview.recruiterId.toString()) ||
+          (interview.interviewerId && joiningUserId === interview.interviewerId.toString())
+        ) {
+          socket.userRole = 'host';
+        }
+      }
+    } catch (err) {
+      console.error('[Socket.IO] Error fetching interview info:', err);
     }
 
     socket.currentRoom = interviewId;
