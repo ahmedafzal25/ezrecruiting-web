@@ -9,10 +9,11 @@ interface ApplicantReviewModalProps {
     onStatusUpdate: (id: string, status: string) => void;
     onSchedule: () => void;
     onMessage: () => void;
+    onProposeHire?: () => void;
 }
 
 export const ApplicantReviewModal: React.FC<ApplicantReviewModalProps> = ({
-    isOpen, onClose, application, onStatusUpdate, onSchedule, onMessage
+    isOpen, onClose, application, onStatusUpdate, onSchedule, onMessage, onProposeHire
 }) => {
     const [activeTab, setActiveTab] = useState<'summary' | 'experience' | 'education'>('summary');
 
@@ -176,6 +177,11 @@ export const ApplicantReviewModal: React.FC<ApplicantReviewModalProps> = ({
                 <div className="flex gap-3 pt-6 mt-2 border-t border-neutral-800">
                     <Button className="flex-1" icon={Video} onClick={onSchedule}>Schedule Interview</Button>
                     <Button variant="outline" className="flex-1" icon={MessageSquare} onClick={onMessage}>Send Message</Button>
+                    {onProposeHire && (
+                        <Button className="bg-[#FFD700]/20 text-[#FFD700] hover:bg-[#FFD700]/30 border border-[#FFD700]/50" onClick={onProposeHire}>
+                            ⭐ Propose as Final Hire
+                        </Button>
+                    )}
                     <Button variant="outline" className="border-red-900/50 text-red-400 hover:bg-red-900/20 hover:border-red-900" onClick={() => onStatusUpdate(application._id, 'Rejected')}>Reject</Button>
                 </div>
             </div>

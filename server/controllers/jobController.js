@@ -191,10 +191,12 @@ exports.updateApplicationStatus = async (req, res) => {
         // We assume job was populated. If not, we'd need to fetch it.
         // Wait, I populated it above.
 
-        // Check ownership
-        // Note: postedBy in Job model is ObjectId.
-        if (application.job.postedBy.toString() !== req.user.id) {
-            return res.status(401).json({ message: 'Not authorized' });
+        // Check ownership: Either the Recruiter who posted it, OR the Freelancer who accepted the delegation
+        const isRecruiter = application.job.postedBy?.toString() === req.user.id;
+        const isDelegatedFreelancer = application.job.delegatedFreelancerId?.toString() === req.user.id && application.job.delegationStatus === 'accepted';
+
+        if (!isRecruiter && !isDelegatedFreelancer) {
+            return res.status(401).json({ message: 'Not authorized to update this pipeline' });
         }
 
         application.status = status;
@@ -207,13 +209,18 @@ exports.updateApplicationStatus = async (req, res) => {
     }
 };
 
-// @desc    Get applications received for jobs posted by current user
+// @desc    Get applications received for jobs posted by current user OR delegated to current user
 // @route   GET /api/jobs/applications/received
-// @access  Private (Recruiter)
+// @access  Private (Recruiter / Interviewer)
 exports.getMyReceivedApplications = async (req, res) => {
     try {
-        // 1. Find jobs posted by user
-        const jobs = await Job.find({ postedBy: req.user.id }).select('_id');
+        // 1. Branch query based on role
+        const isFreelancer = req.user.role === 'freelancer' || req.user.role === 'INTERVIEWER';
+        const jobQuery = isFreelancer 
+            ? { delegatedFreelancerId: req.user.id, delegationStatus: 'accepted' }
+            : { postedBy: req.user.id };
+
+        const jobs = await Job.find(jobQuery).select('_id');
         const jobIds = jobs.map(job => job._id);
 
         // 2. Find applications for these jobs
@@ -230,6 +237,65 @@ exports.getMyReceivedApplications = async (req, res) => {
         res.json(applications);
     } catch (err) {
         console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT-BASED DELEGATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+// @desc    Delegate a job pipeline to a freelancer
+// @route   POST /api/jobs/:jobId/delegate
+// @access  Private (Recruiter — must own the job)
+exports.delegateJobToFreelancer = async (req, res) => {
+    try {
+        const { freelancerId } = req.body;
+
+        if (!freelancerId) {
+            return res.status(400).json({ message: 'freelancerId is required' });
+        }
+
+        const job = await Job.findById(req.params.jobId);
+        if (!job) {
+            return res.status(404).json({ message: 'Job not found' });
+        }
+
+        // Verify ownership — only the recruiter who posted this job can delegate it
+        if (job.postedBy.toString() !== req.user.id) {
+            return res.status(403).json({ message: 'Not authorized — you do not own this job' });
+        }
+
+        // Prevent re-delegation if already pending or accepted
+        if (job.delegationStatus === 'pending' || job.delegationStatus === 'accepted') {
+            return res.status(400).json({
+                message: `Job is already ${job.delegationStatus} for delegation`
+            });
+        }
+
+        // Verify the freelancer exists and has the right role
+        const User = require('../models/User');
+        const freelancer = await User.findById(freelancerId);
+        if (!freelancer) {
+            return res.status(404).json({ message: 'Freelancer not found' });
+        }
+        if (freelancer.role !== 'freelancer' && freelancer.role !== 'INTERVIEWER') {
+            return res.status(400).json({ message: 'Target user is not a freelancer' });
+        }
+
+        // Update delegation fields
+        job.delegatedFreelancerId = freelancerId;
+        job.delegationStatus = 'pending';
+        await job.save();
+
+        // Return the updated job with populated freelancer info
+        const updatedJob = await Job.findById(job._id)
+            .populate('postedBy', 'name email')
+            .populate('delegatedFreelancerId', 'name email profilePicture');
+
+        res.json({ message: 'Job delegated successfully', job: updatedJob });
+    } catch (err) {
+        console.error('delegateJobToFreelancer error:', err);
         res.status(500).json({ message: 'Server error' });
     }
 };

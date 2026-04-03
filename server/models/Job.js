@@ -20,6 +20,22 @@ const jobSchema = new mongoose.Schema({
         enum: ['Active', 'Closed'],
         default: 'Active'
     },
+    // ── Project-Based Delegation ──────────────────────────────────────────────
+    delegatedFreelancerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    delegationStatus: {
+        type: String,
+        enum: ['none', 'pending', 'accepted', 'reviewing', 'completed'],
+        default: 'none'
+    },
+    proposedCandidateId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
     createdAt: { type: Date, default: Date.now }
 });
 

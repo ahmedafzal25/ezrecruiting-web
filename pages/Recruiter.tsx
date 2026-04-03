@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Button, Input, Badge, Modal } from '../components/UI';
-import { Plus, Search, Calendar, Clock, Video, FileText, ChevronRight, BarChart2, User, MapPin, Briefcase, GraduationCap, Github, Linkedin, Globe, Upload, Lock, Shield, MessageSquare, Link as LinkIcon, Download, Star, DollarSign, Sparkles } from 'lucide-react';
+import { Plus, Search, Calendar, Clock, Video, FileText, ChevronRight, BarChart2, User, MapPin, Briefcase, GraduationCap, Github, Linkedin, Globe, Upload, Lock, Shield, MessageSquare, Link as LinkIcon, Download, Star, DollarSign, Sparkles, Send, AlertTriangle, ArrowRight } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { Job, User as UserType } from '../types';
 import InterviewsTab from '../components/InterviewsTab';
@@ -904,19 +904,11 @@ export const ServiceMarketplace: React.FC = () => {
     // Profile View modal
     const [viewProfileId, setViewProfileId] = useState<string | null>(null);
 
-    // Booking modal
+    // Delegation modal
     const [selected, setSelected] = useState<FreelancerService | null>(null);
     const [jobs, setJobs] = useState<any[]>([]);
-    const [candidates, setCandidates] = useState<any[]>([]);
-    
-    // Explicit state variables for the required backend payload
-    const [selectedCandidateId, setSelectedCandidateId] = useState('');
     const [selectedJobId, setSelectedJobId] = useState('');
-    const [scheduledDate, setScheduledDate] = useState('');
-    const [scheduledTime, setScheduledTime] = useState('');
-    const [bookingNotes, setBookingNotes] = useState('');
-    
-    const [bookingLoading, setBookingLoading] = useState(false);
+    const [delegationLoading, setDelegationLoading] = useState(false);
 
     const fetchServices = async () => {
         setLoading(true);
@@ -936,46 +928,34 @@ export const ServiceMarketplace: React.FC = () => {
     useEffect(() => {
         fetchServices();
         apiRequest('/jobs/my-jobs').then(setJobs).catch(console.error);
-        apiRequest('/interviews/eligible-candidates').then(setCandidates).catch(console.error);
     }, []);
 
-    const handleBook = async () => {
-        if (!selected || !selectedCandidateId || !scheduledDate || !scheduledTime) {
-            alert('Please fill in candidate name and details (Date, and Time).');
+    // Filter to only show Active jobs that haven't been delegated yet
+    const availableJobs = jobs.filter(j => j.status === 'Active' && (!j.delegationStatus || j.delegationStatus === 'none'));
+
+    const handleDelegate = async () => {
+        if (!selected) return;
+        if (!selectedJobId) {
+            alert('Please select a job to delegate.');
             return;
         }
-        const fullScheduledTime = new Date(`${scheduledDate}T${scheduledTime}`);
-        if (fullScheduledTime <= new Date()) { alert('Please select a future date and time.'); return; }
 
-        setBookingLoading(true);
+        setDelegationLoading(true);
         try {
-            const result = await apiRequest(`/recruiter/services/${selected._id}/book`, 'POST', {
-                candidateId:   selectedCandidateId,
-                jobId:         selectedJobId || undefined,
-                scheduledTime: fullScheduledTime.toISOString(),
-                notes:         bookingNotes,
+            await apiRequest(`/jobs/${selectedJobId}/delegate`, 'POST', {
+                freelancerId: selected.freelancerId._id,
             });
-            alert(`✅ Interview booked! Meeting ID: ${result.interview.meetingId}`);
+            alert('✅ Delegation request sent to freelancer!');
             setSelected(null);
-            
-            // Reset state
-            setSelectedCandidateId('');
             setSelectedJobId('');
-            setScheduledDate('');
-            setScheduledTime('');
-            setBookingNotes('');
+            // Refresh jobs to update delegation status
+            apiRequest('/jobs/my-jobs').then(setJobs).catch(console.error);
         } catch (err: any) {
-            alert(err.message || 'Failed to book service');
+            alert(err.message || 'Failed to delegate job.');
         } finally {
-            setBookingLoading(false);
+            setDelegationLoading(false);
         }
     };
-
-    const nowLocal = new Date();
-    const minDate = nowLocal.toISOString().slice(0, 10);
-    const minTime = scheduledDate === minDate
-        ? `${String(nowLocal.getHours()).padStart(2, '0')}:${String(nowLocal.getMinutes()).padStart(2, '0')}`
-        : undefined;
 
     const renderStars = (rating: number = 0) => {
         const full = Math.floor(rating);
@@ -984,12 +964,15 @@ export const ServiceMarketplace: React.FC = () => {
         ));
     };
 
+    // Find the selected job object for the summary preview
+    const selectedJob = jobs.find(j => (j._id || j.id) === selectedJobId);
+
     return (
         <div className="space-y-6">
             {/* Header */}
             <div>
                 <h2 className="text-2xl font-bold">Freelancer Marketplace</h2>
-                <p className="text-neutral-400 text-sm mt-1">Book expert interviewers for your candidates — instantly.</p>
+                <p className="text-neutral-400 text-sm mt-1">Delegate your hiring pipeline to expert freelancers — they'll find the perfect candidate for you.</p>
             </div>
 
             {/* Filter Bar */}
@@ -1098,21 +1081,18 @@ export const ServiceMarketplace: React.FC = () => {
                             <div className="p-5 pt-0 flex items-center justify-between">
                                 <div>
                                     <span className="text-2xl font-black text-white">${svc.price}</span>
-                                    <span className="text-xs text-neutral-500 ml-1">/ session</span>
+                                    <span className="text-xs text-neutral-500 ml-1">/ project</span>
                                 </div>
                                 <Button
                                     size="sm"
                                     onClick={() => { 
                                         setSelected(svc); 
-                                        setSelectedCandidateId('');
                                         setSelectedJobId('');
-                                        setScheduledDate('');
-                                        setScheduledTime('');
-                                        setBookingNotes('');
                                     }}
                                     className="bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] hover:from-[#9D4EDD] hover:to-[#7B2CBF] text-white"
                                 >
-                                    Book Interview
+                                    <Send size={14} className="mr-1.5" />
+                                    Delegate Job
                                 </Button>
                             </div>
                         </div>
@@ -1120,11 +1100,11 @@ export const ServiceMarketplace: React.FC = () => {
                 </div>
             )}
 
-            {/* Booking Modal */}
-            <Modal isOpen={!!selected} onClose={() => setSelected(null)} title={`Book: ${selected?.title}`}>
+            {/* ── Delegation Modal ─────────────────────────────────────────────── */}
+            <Modal isOpen={!!selected} onClose={() => setSelected(null)} title="Delegate Job Pipeline">
                 {selected && (
                     <div className="space-y-5">
-                        {/* Service summary */}
+                        {/* Freelancer summary */}
                         <div className="flex items-center gap-3 p-4 bg-neutral-900 rounded-xl border border-neutral-800">
                             <img
                                 src={selected.freelancerId.profilePicture || '/assets/default-avatar.png'}
@@ -1137,61 +1117,110 @@ export const ServiceMarketplace: React.FC = () => {
                             </div>
                             <div className="text-right flex-shrink-0">
                                 <p className="text-xl font-black text-white">${selected.price}</p>
-                                <p className="text-[10px] text-neutral-500">{selected.durationMinutes} min</p>
+                                <p className="text-[10px] text-neutral-500">per project</p>
                             </div>
                         </div>
 
-                        {/* Candidate & Job selectors */}
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">
-                                    Candidate <span className="text-red-400">*</span>
-                                </label>
-                                <select
-                                    className="w-full bg-black/50 border border-neutral-800 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-[#7B2CBF]"
-                                    value={selectedCandidateId}
-                                    onChange={e => setSelectedCandidateId(e.target.value)}
-                                >
-                                    <option value="">Select candidate</option>
-                                    {candidates.map(c => <option key={c._id || c.id} value={c._id || c.id}>{c.name}</option>)}
-                                </select>
+                        {/* Visual Delegation Flow */}
+                        <div className="flex items-center justify-center gap-3 py-3 px-4 bg-gradient-to-r from-[#7B2CBF]/5 via-[#480CA8]/10 to-[#7B2CBF]/5 rounded-xl border border-[#7B2CBF]/20">
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="w-9 h-9 rounded-full bg-[#7B2CBF]/20 flex items-center justify-center">
+                                    <Briefcase size={16} className="text-[#9D4EDD]" />
+                                </div>
+                                <span className="text-[10px] text-neutral-400 font-medium">You</span>
                             </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Job (Optional)</label>
-                                <select
-                                    className="w-full bg-black/50 border border-neutral-800 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-[#7B2CBF]"
-                                    value={selectedJobId}
-                                    onChange={e => setSelectedJobId(e.target.value)}
-                                >
-                                    <option value="">Select job</option>
-                                    {jobs.map(j => <option key={j._id || j.id} value={j._id || j.id}>{j.title}</option>)}
-                                </select>
+                            <ArrowRight size={18} className="text-[#7B2CBF]/60 flex-shrink-0" />
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="w-9 h-9 rounded-full bg-[#7B2CBF]/20 flex items-center justify-center">
+                                    <User size={16} className="text-[#9D4EDD]" />
+                                </div>
+                                <span className="text-[10px] text-neutral-400 font-medium">Freelancer</span>
+                            </div>
+                            <ArrowRight size={18} className="text-[#7B2CBF]/60 flex-shrink-0" />
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="w-9 h-9 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                                    <Sparkles size={16} className="text-emerald-400" />
+                                </div>
+                                <span className="text-[10px] text-neutral-400 font-medium">Hire</span>
                             </div>
                         </div>
 
-                        {/* Date & Time */}
-                        <div className="grid grid-cols-2 gap-4">
-                            <Input label="Date *" type="date" min={minDate}
-                                value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
-                            <Input label="Time *" type="time" min={minTime}
-                                value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} />
-                        </div>
-
-                        {/* Notes */}
+                        {/* Job Selector */}
                         <div>
-                            <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Notes for Interviewer</label>
-                            <textarea
-                                className="w-full bg-black/50 border border-neutral-800 rounded-lg px-4 py-2.5 text-white text-sm h-20 outline-none focus:border-[#7B2CBF] resize-none"
-                                placeholder="What should the interviewer focus on? (e.g. system design, coding, behavioral)"
-                                value={bookingNotes}
-                                onChange={e => setBookingNotes(e.target.value)}
-                            />
+                            <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">
+                                Select Job Pipeline <span className="text-red-400">*</span>
+                            </label>
+                            <select
+                                id="delegation-job-select"
+                                className="w-full bg-black/50 border border-neutral-800 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-[#7B2CBF] transition-colors"
+                                value={selectedJobId}
+                                onChange={e => setSelectedJobId(e.target.value)}
+                            >
+                                <option value="">Choose a job to delegate...</option>
+                                {availableJobs.map(j => (
+                                    <option key={j._id || j.id} value={j._id || j.id}>
+                                        {j.title} — {j.company} ({j.applicantCount ?? 0} applicants)
+                                    </option>
+                                ))}
+                            </select>
+                            {availableJobs.length === 0 && (
+                                <p className="text-xs text-amber-400/80 mt-1.5 flex items-center gap-1">
+                                    <AlertTriangle size={12} />
+                                    No active jobs available for delegation. Create a job first.
+                                </p>
+                            )}
                         </div>
 
+                        {/* Selected Job Summary */}
+                        {selectedJob && (
+                            <div className="p-3.5 bg-neutral-900/80 rounded-xl border border-neutral-800 space-y-2">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <p className="text-sm font-semibold text-white">{selectedJob.title}</p>
+                                        <p className="text-xs text-neutral-400 mt-0.5">{selectedJob.company} · {selectedJob.location}</p>
+                                    </div>
+                                    <Badge variant="neutral" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                                        {selectedJob.type}
+                                    </Badge>
+                                </div>
+                                {selectedJob.skills?.length > 0 && (
+                                    <div className="flex flex-wrap gap-1">
+                                        {selectedJob.skills.slice(0, 5).map((sk: string, i: number) => (
+                                            <span key={i} className="text-[10px] px-1.5 py-0.5 bg-neutral-800 text-neutral-400 rounded-full">
+                                                {sk}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Info Callout */}
+                        <div className="flex gap-3 p-3.5 bg-[#7B2CBF]/5 rounded-xl border border-[#7B2CBF]/15">
+                            <Shield size={18} className="text-[#9D4EDD] flex-shrink-0 mt-0.5" />
+                            <p className="text-xs text-neutral-300 leading-relaxed">
+                                By delegating this job, this freelancer will manage the candidate pipeline, 
+                                conduct interviews, and propose a final hire for your approval. You retain 
+                                full control and can revoke delegation at any time.
+                            </p>
+                        </div>
+
+                        {/* Actions */}
                         <div className="flex justify-end gap-3 pt-1 border-t border-neutral-800">
                             <Button variant="ghost" onClick={() => setSelected(null)}>Cancel</Button>
-                            <Button onClick={handleBook} disabled={bookingLoading}>
-                                {bookingLoading ? 'Booking...' : `Confirm & Book — $${selected.price}`}
+                            <Button
+                                onClick={handleDelegate}
+                                disabled={delegationLoading || !selectedJobId}
+                                className="bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] hover:from-[#9D4EDD] hover:to-[#7B2CBF] disabled:opacity-50"
+                            >
+                                {delegationLoading ? (
+                                    'Sending...'
+                                ) : (
+                                    <>
+                                        <Send size={14} className="mr-1.5" />
+                                        Send Delegation Request
+                                    </>
+                                )}
                             </Button>
                         </div>
                     </div>

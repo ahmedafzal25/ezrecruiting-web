@@ -14,6 +14,11 @@ const {
     // Booking requests
     acceptRequest,
     rejectRequest,
+    // Project-based delegation
+    getMyDelegatedJobs,
+    acceptDelegation,
+    rejectDelegation,
+    proposeHire,
 } = require('../controllers/freelancerController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -28,6 +33,12 @@ router.delete('/services/:serviceId', protect, authorize(...FREELANCER_ROLES), d
 // ── Booking Requests (Accept/Reject) ───────────────────────────────────────────
 router.put('/requests/:id/accept',    protect, authorize(...FREELANCER_ROLES), acceptRequest);
 router.put('/requests/:id/reject',    protect, authorize(...FREELANCER_ROLES), rejectRequest);
+
+// ── Project-Based Delegation (Fetch / Accept / Reject / Propose) ───────────────────────
+router.get('/delegations',                    protect, authorize(...FREELANCER_ROLES), getMyDelegatedJobs);
+router.put('/delegations/:jobId/accept',  protect, authorize(...FREELANCER_ROLES), acceptDelegation);
+router.put('/delegations/:jobId/reject',  protect, authorize(...FREELANCER_ROLES), rejectDelegation);
+router.post('/delegations/:jobId/propose/:candidateId', protect, authorize(...FREELANCER_ROLES), proposeHire);
 
 // ── Legacy Gig Board ─────────────────────────────────────────────────────────
 router.get('/gigs/open',              protect, authorize(...FREELANCER_ROLES), getOpenGigs);

@@ -2,11 +2,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, Button, Input, Badge, Modal } from '../components/UI';
-import { Video, Calendar, DollarSign, Clock, User, Briefcase, Star, Upload, MessageSquare, Plus, Edit2, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Video, Calendar, DollarSign, Clock, User, Briefcase, Star, Upload, MessageSquare, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, CheckCircle2, XCircle, ArrowRight, MapPin, Shield, Building2, Search } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { User as UserType, Interview, Message } from '../types';
 import InterviewsTab from '../components/InterviewsTab';
 import { FreelancerProfile } from '../components/FreelancerProfile';
+import { ApplicantReviewModal } from '../components/ApplicantReviewModal';
 
 const convertToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -21,6 +22,7 @@ export const InterviewerDashboard: React.FC = () => {
     const [interviews, setInterviews] = useState<Interview[]>([]);
     const [messages, setMessages] = useState<Message[]>([]);
     const [user, setUser] = useState<UserType | null>(null);
+    const [delegatedJobs, setDelegatedJobs] = useState<any[]>([]);
 
     useEffect(() => {
         apiRequest('/users/profile').then(setUser).catch(console.error);
@@ -31,7 +33,12 @@ export const InterviewerDashboard: React.FC = () => {
             })
             .catch(console.error);
         apiRequest('/interviews/my-messages').then(setMessages).catch(console.error);
+        apiRequest('/freelancers/delegations')
+            .then(data => setDelegatedJobs(data))
+            .catch(console.error);
     }, []);
+
+    const pendingDelegations = delegatedJobs.filter(job => job.delegationStatus === 'pending');
 
     return (
         <div className="space-y-8">
@@ -135,27 +142,22 @@ export const InterviewerDashboard: React.FC = () => {
                     })()}
                 </Card>
 
-                <Card title="Booking Requests">
-                    {interviews.filter(i => i.status === 'Pending').length === 0 ? <p className="text-neutral-500">No pending booking requests.</p> : (
+                <Card title="Pending Project Requests" className="border-amber-500/20 bg-amber-500/5">
+                    {pendingDelegations.length === 0 ? <p className="text-neutral-500">No pending projects.</p> : (
                         <div className="space-y-3">
-                            {interviews.filter(i => i.status === 'Pending').map(inv => (
-                                <div key={inv._id} className="p-4 border border-neutral-800 rounded-lg bg-neutral-900/50">
+                            {pendingDelegations.map(job => (
+                                <div key={job._id} className="p-4 border border-amber-500/30 rounded-lg bg-neutral-900/50">
                                     <div className="mb-3">
                                         <p className="font-semibold text-white flex gap-2 items-center">
-                                            <Calendar size={16} className="text-[#7B2CBF]" />
-                                            {inv.scheduledTime ? new Date(inv.scheduledTime).toLocaleString() : 'Unknown Time'}
+                                            <Briefcase size={16} className="text-amber-400" />
+                                            {job.title}
                                         </p>
                                         <p className="text-sm text-neutral-400 mt-1">
-                                            Requested by: <span className="font-medium text-white">{(inv.recruiterId as any)?.name}</span>
+                                            Company: <span className="font-medium text-white">{job.company || job.postedBy?.companyName}</span>
                                         </p>
-                                        <p className="text-sm text-neutral-400">
-                                            For Candidate: <span className="font-medium text-white">{(inv.candidateId as any)?.name}</span>
+                                        <p className="text-sm text-neutral-400 mt-1">
+                                            Delegated by: <span className="font-medium text-white">{job.postedBy?.name}</span>
                                         </p>
-                                        {inv.notes && (
-                                            <div className="mt-2 p-2 bg-neutral-800 rounded text-xs text-neutral-300">
-                                                <span className="text-neutral-500 font-semibold">Notes:</span> {inv.notes}
-                                            </div>
-                                        )}
                                     </div>
                                     <div className="flex gap-2">
                                         <Button
@@ -163,29 +165,28 @@ export const InterviewerDashboard: React.FC = () => {
                                             size="sm"
                                             onClick={async () => {
                                                 try {
-                                                    await apiRequest(`/freelancers/requests/${inv._id}/accept`, 'PUT');
-                                                    alert("Interview accepted!");
-                                                    // Refresh list
-                                                    apiRequest('/interviews/my-interviews').then(setInterviews);
-                                                } catch (e) { alert("Failed to accept"); }
+                                                    await apiRequest(`/freelancers/delegations/${job._id}/accept`, 'PUT');
+                                                    alert("✅ Delegation accepted! You can now manage this pipeline in Delegated Projects.");
+                                                    setDelegatedJobs(prev => prev.filter(j => j._id !== job._id)); // Optimistic UI
+                                                } catch (e: any) { alert(e.message || "Failed to accept"); }
                                             }}
                                         >
-                                            Accept
+                                            Accept Project
                                         </Button>
                                         <Button
                                             variant="outline"
                                             className="flex-1 border-red-900/50 text-red-500 hover:bg-red-900/20"
                                             size="sm"
                                             onClick={async () => {
+                                                if (!confirm('Are you sure you want to decline this delegation?')) return;
                                                 try {
-                                                    await apiRequest(`/freelancers/requests/${inv._id}/reject`, 'PUT');
-                                                    alert("Interview rejected");
-                                                    // Refresh list
-                                                    apiRequest('/interviews/my-interviews').then(setInterviews);
-                                                } catch (e) { alert("Failed to reject"); }
+                                                    await apiRequest(`/freelancers/delegations/${job._id}/reject`, 'PUT');
+                                                    alert("Delegation declined.");
+                                                    setDelegatedJobs(prev => prev.filter(j => j._id !== job._id)); // Optimistic UI
+                                                } catch (e: any) { alert(e.message || "Failed to reject"); }
                                             }}
                                         >
-                                            Decline
+                                            Reject
                                         </Button>
                                     </div>
                                 </div>
@@ -652,3 +653,488 @@ export const FreelancerServiceManager: React.FC = () => {
     );
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DELEGATED PROJECTS — Freelancer views & manages delegated job pipelines
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface DelegatedJob {
+    _id: string;
+    title: string;
+    description: string;
+    company: string;
+    location: string;
+    type: string;
+    skills: string[];
+    salary?: string;
+    delegationStatus: 'pending' | 'accepted' | 'completed';
+    applicants: string[];
+    postedBy: {
+        _id: string;
+        name: string;
+        companyName?: string;
+        profilePicture?: string;
+        email?: string;
+    };
+    createdAt: string;
+}
+
+const STATUS_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
+    pending:   { bg: 'bg-amber-500/10',   text: 'text-amber-400',   border: 'border-amber-500/20',   label: 'Pending Approval' },
+    accepted:  { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20', label: 'Active Project' },
+    completed: { bg: 'bg-blue-500/10',    text: 'text-blue-400',    border: 'border-blue-500/20',    label: 'Completed' },
+};
+
+export const DelegatedProjects: React.FC = () => {
+    const [jobs, setJobs] = useState<DelegatedJob[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+    const fetchDelegations = async () => {
+        setLoading(true);
+        try {
+            const data = await apiRequest('/freelancers/delegations');
+            setJobs(data);
+        } catch (err) {
+            console.error('fetchDelegations error:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => { fetchDelegations(); }, []);
+
+    const handleAccept = async (jobId: string) => {
+        setActionLoading(jobId);
+        try {
+            await apiRequest(`/freelancers/delegations/${jobId}/accept`, 'PUT');
+            alert('✅ Delegation accepted! You can now manage this pipeline.');
+            fetchDelegations();
+        } catch (err: any) {
+            alert(err.message || 'Failed to accept delegation');
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const handleReject = async (jobId: string) => {
+        if (!confirm('Are you sure you want to decline this delegation?')) return;
+        setActionLoading(jobId);
+        try {
+            await apiRequest(`/freelancers/delegations/${jobId}/reject`, 'PUT');
+            alert('Delegation declined.');
+            fetchDelegations();
+        } catch (err: any) {
+            alert(err.message || 'Failed to reject delegation');
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const pendingCount = jobs.filter(j => j.delegationStatus === 'pending').length;
+    const activeCount = jobs.filter(j => j.delegationStatus === 'accepted').length;
+    const completedCount = jobs.filter(j => j.delegationStatus === 'completed').length;
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div>
+                <h2 className="text-2xl font-bold">Delegated Projects</h2>
+                <p className="text-neutral-400 text-sm mt-1">
+                    Job pipelines assigned to you by recruiters. Accept to start managing the hiring process.
+                </p>
+            </div>
+
+            {/* Stats Bar */}
+            <div className="grid grid-cols-3 gap-4">
+                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl text-center">
+                    <p className="text-2xl font-bold text-amber-400">{pendingCount}</p>
+                    <p className="text-xs text-neutral-400 mt-1">Pending</p>
+                </div>
+                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl text-center">
+                    <p className="text-2xl font-bold text-emerald-400">{activeCount}</p>
+                    <p className="text-xs text-neutral-400 mt-1">Active</p>
+                </div>
+                <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl text-center">
+                    <p className="text-2xl font-bold text-blue-400">{completedCount}</p>
+                    <p className="text-xs text-neutral-400 mt-1">Completed</p>
+                </div>
+            </div>
+
+            {/* Job Cards */}
+            {loading ? (
+                <div className="grid md:grid-cols-2 gap-6">
+                    {[1, 2, 3, 4].map(i => (
+                        <div key={i} className="h-56 bg-neutral-900 border border-neutral-800 rounded-xl animate-pulse" />
+                    ))}
+                </div>
+            ) : jobs.length === 0 ? (
+                <div className="text-center py-20 border border-neutral-800 rounded-xl">
+                    <Briefcase size={48} className="text-neutral-700 mx-auto mb-4" />
+                    <p className="text-neutral-500 text-lg font-medium">No delegated projects yet</p>
+                    <p className="text-neutral-600 text-sm mt-1">
+                        When a recruiter delegates a job pipeline to you, it will appear here.
+                    </p>
+                </div>
+            ) : (
+                <div className="grid md:grid-cols-2 gap-6">
+                    {jobs.map(job => {
+                        const style = STATUS_STYLES[job.delegationStatus] || STATUS_STYLES.pending;
+                        const isProcessing = actionLoading === job._id;
+
+                        return (
+                            <div
+                                key={job._id}
+                                className={`flex flex-col bg-neutral-900 border rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg ${
+                                    job.delegationStatus === 'pending'
+                                        ? 'border-amber-500/30 hover:shadow-amber-900/10'
+                                        : job.delegationStatus === 'accepted'
+                                            ? 'border-emerald-500/20 hover:shadow-emerald-900/10'
+                                            : 'border-neutral-800 hover:shadow-purple-900/10'
+                                }`}
+                            >
+                                {/* Status banner */}
+                                <div className={`px-5 py-2.5 flex items-center justify-between ${style.bg} border-b ${style.border}`}>
+                                    <div className="flex items-center gap-2">
+                                        <div className={`w-2 h-2 rounded-full ${job.delegationStatus === 'pending' ? 'bg-amber-400 animate-pulse' : job.delegationStatus === 'accepted' ? 'bg-emerald-400' : 'bg-blue-400'}`} />
+                                        <span className={`text-xs font-semibold uppercase tracking-wider ${style.text}`}>
+                                            {style.label}
+                                        </span>
+                                    </div>
+                                    <span className="text-[10px] text-neutral-500">
+                                        {new Date(job.createdAt).toLocaleDateString()}
+                                    </span>
+                                </div>
+
+                                {/* Job Details */}
+                                <div className="p-5 flex-1 space-y-3">
+                                    <h3 className="font-bold text-white text-lg leading-snug">{job.title}</h3>
+
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-neutral-400">
+                                        <span className="flex items-center gap-1.5">
+                                            <Building2 size={13} className="text-neutral-500" />
+                                            {job.company}
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <MapPin size={13} className="text-neutral-500" />
+                                            {job.location}
+                                        </span>
+                                        <span className="flex items-center gap-1.5">
+                                            <Briefcase size={13} className="text-neutral-500" />
+                                            {job.type}
+                                        </span>
+                                    </div>
+
+                                    {job.salary && (
+                                        <p className="text-sm text-neutral-300 flex items-center gap-1.5">
+                                            <DollarSign size={13} className="text-[#7B2CBF]" />
+                                            {job.salary}
+                                        </p>
+                                    )}
+
+                                    {job.skills.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {job.skills.slice(0, 5).map((sk, i) => (
+                                                <span key={i} className="text-[10px] px-2 py-0.5 bg-neutral-800 text-neutral-300 rounded-full border border-neutral-700">
+                                                    {sk}
+                                                </span>
+                                            ))}
+                                            {job.skills.length > 5 && (
+                                                <span className="text-[10px] px-2 py-0.5 bg-neutral-800 text-neutral-500 rounded-full">
+                                                    +{job.skills.length - 5}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Recruiter info */}
+                                    <div className="flex items-center gap-2.5 pt-2 border-t border-neutral-800">
+                                        <img
+                                            src={job.postedBy?.profilePicture || '/assets/default-avatar.png'}
+                                            alt={job.postedBy?.name}
+                                            className="w-8 h-8 rounded-full object-cover border border-neutral-700"
+                                        />
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-semibold text-white truncate">
+                                                {job.postedBy?.name}
+                                            </p>
+                                            <p className="text-[10px] text-neutral-500 truncate">
+                                                {job.postedBy?.companyName || job.postedBy?.email}
+                                            </p>
+                                        </div>
+                                        <span className="ml-auto text-[10px] text-neutral-500 flex items-center gap-1">
+                                            <User size={10} />
+                                            {job.applicants?.length || 0} applicants
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Actions */}
+                                {job.delegationStatus === 'pending' && (
+                                    <div className="px-5 pb-5 flex gap-3">
+                                        <Button
+                                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                                            onClick={() => handleAccept(job._id)}
+                                            disabled={isProcessing}
+                                        >
+                                            <CheckCircle2 size={15} />
+                                            {isProcessing ? 'Accepting...' : 'Accept Project'}
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            className="flex-1 border-red-900/50 text-red-400 hover:bg-red-900/20 gap-1.5"
+                                            onClick={() => handleReject(job._id)}
+                                            disabled={isProcessing}
+                                        >
+                                            <XCircle size={15} />
+                                            Decline
+                                        </Button>
+                                    </div>
+                                )}
+
+                                {job.delegationStatus === 'accepted' && (
+                                    <div className="px-5 pb-5">
+                                        <div className="flex items-center gap-2.5 p-3 bg-emerald-500/5 rounded-lg border border-emerald-500/15 mb-3">
+                                            <Shield size={16} className="text-emerald-400 flex-shrink-0" />
+                                            <p className="text-xs text-neutral-300 leading-relaxed">
+                                                You're actively managing this pipeline. Review applicants, conduct interviews, and propose your top hire.
+                                            </p>
+                                        </div>
+                                        <Link 
+                                            to="/interviewer/pipeline" 
+                                            className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg text-sm font-semibold transition-colors"
+                                        >
+                                            Manage Pipeline &rarr;
+                                        </Link>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INTERVIEWER APPLICANTS — Pipeline management for delegated projects
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const InterviewerApplicants: React.FC = () => {
+    const [selectedApp, setSelectedApp] = useState<any | null>(null);
+    const [applications, setApplications] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    // Modals
+    const [isScheduleOpen, setIsScheduleOpen] = useState(false);
+    const [isMessageOpen, setIsMessageOpen] = useState(false);
+
+    // Modal Forms
+    const [scheduleData, setScheduleData] = useState({ date: '', time: '' });
+    const [messageData, setMessageData] = useState({ content: '' });
+
+    const fetchApplications = async () => {
+        try {
+            const data = await apiRequest('/jobs/applications/received');
+            setApplications(data);
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchApplications();
+    }, []);
+
+    const handleStatusUpdate = async (id: string, status: string) => {
+        try {
+            await apiRequest(`/jobs/applications/${id}/status`, 'PUT', { status });
+            // Update local state
+            setApplications(applications.map(app => app._id === id ? { ...app, status } : app));
+            if (selectedApp && selectedApp._id === id) {
+                setSelectedApp({ ...selectedApp, status });
+            }
+        } catch (error) {
+            alert('Failed to update status. You may not have authorization for this pipeline.');
+        }
+    };
+
+    const handleSchedule = async () => {
+        if (!selectedApp || !scheduleData.date || !scheduleData.time) {
+            alert("Please provide Date and Time.");
+            return;
+        }
+
+        const now = new Date();
+        const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+        const currentTimeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
+        if (scheduleData.date < todayStr || (scheduleData.date === todayStr && scheduleData.time < currentTimeStr)) {
+            alert("Please select a valid future date and time.");
+            return;
+        }
+
+        try {
+            const scheduledTime = new Date(`${scheduleData.date}T${scheduleData.time}`).toISOString();
+            await apiRequest('/interviews/schedule', 'POST', {
+                candidateId: selectedApp.candidate._id,
+                jobId: selectedApp.job?._id,
+                scheduledTime
+            });
+            alert('Interview scheduled!');
+            await handleStatusUpdate(selectedApp._id, 'Interview');
+            setIsScheduleOpen(false);
+        } catch (error) {
+            alert('Failed to schedule');
+        }
+    };
+
+    const handleSendMessage = async () => {
+        if (!selectedApp) return;
+        try {
+            await apiRequest('/interviews/message', 'POST', {
+                receiverId: selectedApp.candidate._id,
+                content: messageData.content
+            });
+            alert('Message sent!');
+            setIsMessageOpen(false);
+        } catch (error) {
+            alert('Failed to send message');
+        }
+    };
+
+    const handleProposeHire = async () => {
+        if (!selectedApp) return;
+        if (!confirm('Are you sure? This will lock the pipeline and send this candidate to the recruiter for final approval.')) return;
+        
+        try {
+            await apiRequest(`/freelancers/delegations/${selectedApp.job._id || selectedApp.job}/propose/${selectedApp.candidate._id}`, 'POST');
+            alert('🎉 Candidate successfully proposed to Recruiter! Your pipeline mission is complete.');
+            window.location.hash = '#/interviewer';
+        } catch (error: any) {
+            alert(error.message || 'Failed to propose candidate');
+        }
+    };
+
+    // Helper to get consistent data
+    const getCandidateData = (app: any) => {
+        const profile = app.candidate.profile || {};
+        return {
+            name: app.candidate.name,
+            profilePicture: app.candidate.profilePicture,
+            headline: profile.headline || app.candidate.headline || 'Candidate',
+            bio: profile.bio,
+            skills: app.skills?.length > 0 ? app.skills : (profile.skills || app.candidate.skills || []),
+            experience: app.experience?.length > 0 ? app.experience : (profile.experience || app.candidate.experience || []),
+            education: app.education?.length > 0 ? app.education : (profile.education || app.candidate.education || []),
+            resume: app.resume || profile.resume || app.candidate.resumeUrl
+        };
+    };
+
+    const nowLocal = new Date();
+    const minDateLocal = nowLocal.getFullYear() + '-' + String(nowLocal.getMonth() + 1).padStart(2, '0') + '-' + String(nowLocal.getDate()).padStart(2, '0');
+    const minTimeLocal = scheduleData.date === minDateLocal ? String(nowLocal.getHours()).padStart(2, '0') + ':' + String(nowLocal.getMinutes()).padStart(2, '0') : undefined;
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h2 className="text-2xl font-bold">Manage Pipeline</h2>
+                <p className="text-neutral-400 text-sm mt-1">
+                    Review applicants and schedule interviews for the job pipelines you are managing.
+                </p>
+            </div>
+
+            <div className="flex gap-4 mb-6">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-2.5 text-neutral-500 w-5 h-5" />
+                    <Input placeholder="Search candidates..." className="pl-10" />
+                </div>
+            </div>
+
+            {loading ? <p>Loading pipeline...</p> : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {applications.length === 0 && <p className="text-neutral-500 col-span-3">No applicants found for your delegated projects yet.</p>}
+                    {applications.map((app) => {
+                        const data = getCandidateData(app);
+                        return (
+                            <Card key={app._id} className="flex flex-col gap-4 group hover:border-[#7B2CBF]/50 cursor-pointer relative" onClick={() => setSelectedApp(app)}>
+                                <div className="absolute top-4 right-4">
+                                    <Badge variant={app.status === 'Applied' ? 'neutral' : app.status === 'Rejected' ? 'outline' : 'neutral'} className={app.status === 'Rejected' ? 'text-red-400 border-red-900' : 'text-[#7B2CBF]'}>
+                                        {app.status}
+                                    </Badge>
+                                </div>
+                                <div className="flex items-start justify-between">
+                                    <div className="flex gap-3">
+                                        <img src={data.profilePicture || "/assets/default-avatar.png"} className="w-12 h-12 rounded-lg object-cover" alt="profile" />
+                                        <div>
+                                            <h3 className="font-semibold text-white">{data.name}</h3>
+                                            <p className="text-xs text-neutral-400">{data.headline}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-xs text-neutral-500">
+                                    Applied for <span className="text-white font-medium">{app.job.title}</span>
+                                </div>
+                                <div className="flex gap-2 flex-wrap">
+                                    {data.skills?.slice(0, 3).map((s: string, idx: number) => (
+                                        <span key={idx} className="text-xs bg-neutral-800 px-2 py-1 rounded text-neutral-300">{s}</span>
+                                    ))}
+                                </div>
+                                <Button size="sm" variant="outline" className="w-full mt-auto" onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedApp(app);
+                                }}>Review Application</Button>
+                            </Card>
+                        )
+                    })}
+                </div>
+            )}
+
+            {/* Candidate Profile Modal */}
+            <ApplicantReviewModal
+                isOpen={selectedApp !== null}
+                onClose={() => setSelectedApp(null)}
+                application={selectedApp}
+                onStatusUpdate={handleStatusUpdate}
+                onSchedule={() => setIsScheduleOpen(true)}
+                onMessage={() => setIsMessageOpen(true)}
+                onProposeHire={handleProposeHire}
+            />
+
+            {/* Schedule Interview Modal */}
+            <Modal isOpen={isScheduleOpen} onClose={() => setIsScheduleOpen(false)} title="Schedule Interview">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <Input label="Date" type="date" min={minDateLocal} value={scheduleData.date} onChange={e => setScheduleData({ ...scheduleData, date: e.target.value })} />
+                        <Input label="Time" type="time" min={minTimeLocal} value={scheduleData.time} onChange={e => setScheduleData({ ...scheduleData, time: e.target.value })} />
+                    </div>
+                    <div className="flex justify-end gap-3 pt-4">
+                        <Button variant="ghost" onClick={() => setIsScheduleOpen(false)}>Cancel</Button>
+                        <Button onClick={handleSchedule}>Confirm Schedule</Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Send Message Modal */}
+            <Modal isOpen={isMessageOpen} onClose={() => setIsMessageOpen(false)} title="Send Message">
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-neutral-400 mb-1.5">Message</label>
+                        <textarea
+                            className="w-full bg-black/50 border border-neutral-800 rounded-lg px-4 py-3 text-white h-32 focus:border-[#7B2CBF] outline-none"
+                            placeholder="Type your message to the candidate..."
+                            value={messageData.content}
+                            onChange={e => setMessageData({ content: e.target.value })}
+                        />
+                    </div>
+                    <div className="flex justify-end gap-3 pt-4">
+                        <Button variant="ghost" onClick={() => setIsMessageOpen(false)}>Cancel</Button>
+                        <Button onClick={handleSendMessage}>Send Message</Button>
+                    </div>
+                </div>
+            </Modal>
+        </div>
+    );
+};

@@ -441,3 +441,5 @@ connectDB().then(() => {
   console.error('Database connection failure:', err);
   process.exit(1);
 });
+
+// Restart trigger

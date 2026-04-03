@@ -4,6 +4,7 @@ const Interview = require('../models/Interview');
 const Message = require('../models/Message');
 const User = require('../models/User');
 const Availability = require('../models/Availability');
+const Job = require('../models/Job');
 const { v4: uuidv4 } = require('uuid');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -234,12 +235,19 @@ exports.updateProfile = async (req, res) => {
     // Double-Validate Experience dates
     if (experience && Array.isArray(experience)) {
       for (const exp of experience) {
-        if (exp.startDate) {
-          if (new Date(exp.startDate) > new Date()) {
+        if (exp.title || exp.company) {
+          if (!exp.startDate) {
+            return res.status(400).json({ message: 'Start date is required for all experience entries.' });
+          }
+          const start = new Date(exp.startDate);
+          if (start > new Date()) {
             return res.status(400).json({ message: 'Start date cannot be in the future.' });
           }
-          if (exp.endDate && new Date(exp.endDate) < new Date(exp.startDate)) {
-            return res.status(400).json({ message: 'End date cannot be before the start date.' });
+          if (exp.endDate) {
+            const end = new Date(exp.endDate);
+            if (end < start) {
+              return res.status(400).json({ message: 'End date cannot be before the start date.' });
+            }
           }
         }
       }
@@ -302,3 +310,159 @@ exports.getAvailability = async (req, res) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT-BASED DELEGATION — Fetch / Accept / Reject
+// ─────────────────────────────────────────────────────────────────────────────
+
+// @desc    Get all jobs delegated to the current freelancer
+// @route   GET /api/freelancers/delegations
+// @access  Private (freelancer | INTERVIEWER)
+exports.getMyDelegatedJobs = async (req, res) => {
+  try {
+    const jobs = await Job.find({ delegatedFreelancerId: req.user._id })
+      .populate('postedBy', 'name companyName profilePicture email')
+      .sort({ createdAt: -1 });
+    res.json(jobs);
+  } catch (error) {
+    console.error('getMyDelegatedJobs error:', error);
+    res.status(500).json({ message: 'Failed to fetch delegated jobs', error: error.message });
+  }
+};
+
+// @desc    Accept a delegated job project
+// @route   PUT /api/freelancers/delegations/:jobId/accept
+// @access  Private (freelancer | INTERVIEWER — must be the delegated freelancer)
+exports.acceptDelegation = async (req, res) => {
+  try {
+    const job = await Job.findById(req.params.jobId)
+      .populate('postedBy', 'name email');
+
+    if (!job) {
+      return res.status(404).json({ message: 'Job not found' });
+    }
+
+    // Security: Ensure this freelancer is the one who was delegated
+    if (!job.delegatedFreelancerId || job.delegatedFreelancerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized — this job was not delegated to you' });
+    }
+
+    // Must be in 'pending' state to accept
+    if (job.delegationStatus !== 'pending') {
+      return res.status(400).json({
+        message: `Cannot accept — delegation status is '${job.delegationStatus}'`
+      });
+    }
+
+    job.delegationStatus = 'accepted';
+    await job.save();
+
+    // Notify the recruiter that the freelancer accepted
+    await Message.create({
+      senderId: req.user._id,
+      receiverId: job.postedBy._id,
+      content: `Freelancer ${req.user.name} accepted the delegation for job "${job.title}".`
+    });
+
+    const updatedJob = await Job.findById(job._id)
+      .populate('postedBy', 'name email')
+      .populate('delegatedFreelancerId', 'name email profilePicture');
+
+    res.json({ message: 'Delegation accepted', job: updatedJob });
+  } catch (error) {
+    console.error('acceptDelegation error:', error);
+    res.status(500).json({ message: 'Failed to accept delegation', error: error.message });
+  }
+};
+
+// @desc    Reject a delegated job project
+// @route   PUT /api/freelancers/delegations/:jobId/reject
+// @access  Private (freelancer | INTERVIEWER — must be the delegated freelancer)
+exports.rejectDelegation = async (req, res) => {
+  try {
+    const job = await Job.findById(req.params.jobId)
+      .populate('postedBy', 'name email');
+
+    if (!job) {
+      return res.status(404).json({ message: 'Job not found' });
+    }
+
+    // Security: Ensure this freelancer is the one who was delegated
+    if (!job.delegatedFreelancerId || job.delegatedFreelancerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized — this job was not delegated to you' });
+    }
+
+    // Must be in 'pending' state to reject
+    if (job.delegationStatus !== 'pending') {
+      return res.status(400).json({
+        message: `Cannot reject — delegation status is '${job.delegationStatus}'`
+      });
+    }
+
+    // Reset delegation fields so the recruiter can delegate to someone else
+    job.delegatedFreelancerId = null;
+    job.delegationStatus = 'none';
+    await job.save();
+
+    // Notify the recruiter that the freelancer rejected
+    await Message.create({
+      senderId: req.user._id,
+      receiverId: job.postedBy._id,
+      content: `Freelancer ${req.user.name} declined the delegation for job "${job.title}".`
+    });
+
+    res.json({ message: 'Delegation rejected — job is available for re-delegation', job });
+  } catch (error) {
+    console.error('rejectDelegation error:', error);
+    res.status(500).json({ message: 'Failed to reject delegation', error: error.message });
+  }
+};
+
+// @desc    Propose a final hire for a delegated job pipeline
+// @route   POST /api/freelancers/delegations/:jobId/propose/:candidateId
+// @access  Private (freelancer | INTERVIEWER)
+exports.proposeHire = async (req, res) => {
+  try {
+    const { jobId, candidateId } = req.params;
+    const Application = require('../models/Application');
+
+    // Fetch the job and populate recruiter
+    const job = await Job.findById(jobId).populate('postedBy', 'name email');
+    if (!job) {
+      return res.status(404).json({ message: 'Job not found' });
+    }
+
+    // Security: Ensure this freelancer is the one who was delegated
+    if (!job.delegatedFreelancerId || job.delegatedFreelancerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized — this job is not actively delegated to you' });
+    }
+
+    // Must be in 'accepted' state to propose
+    if (job.delegationStatus !== 'accepted') {
+      return res.status(400).json({ message: `Cannot propose hire — delegation status is '${job.delegationStatus}'` });
+    }
+
+    // Update the Job document
+    job.proposedCandidateId = candidateId;
+    job.delegationStatus = 'reviewing';
+    await job.save();
+
+    // Update the Application document
+    const application = await Application.findOne({ job: jobId, candidate: candidateId });
+    if (application) {
+        application.status = 'Proposed'; 
+        await application.save();
+    }
+
+    // Notify the recruiter
+    await Message.create({
+      senderId: req.user._id,
+      receiverId: job.postedBy._id,
+      content: `Your delegated freelancer has proposed a final candidate for the ${job.title} role. Please review.`
+    });
+
+    res.json({ message: 'Hire proposed successfully', job });
+  } catch (error) {
+    console.error('proposeHire error:', error);
+    res.status(500).json({ message: 'Failed to propose hire', error: error.message });
+  }
+};
