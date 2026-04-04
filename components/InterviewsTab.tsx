@@ -1,23 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    Calendar, Clock, Video, Plus, User, Briefcase,
-    ExternalLink, Search, X, Award
+    Calendar, Clock, Video, Plus, Briefcase,
+    Search, X, Award, User
 } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { Card, Button, Badge, Modal, Input } from './UI';
 import { useToast } from './Toast';
 import AIReportCard from './AIReportCard';
 
+// ─────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────
 interface InterviewData {
     _id: string;
     meetingId: string;
     scheduledTime: string;
     status: 'Pending' | 'Accepted' | 'Rejected' | 'Scheduled' | 'InProgress' | 'Completed' | 'Cancelled';
-    paymentStatus?: 'Unpaid' | 'Paid';
     notes?: string;
     candidateId: { _id: string; name: string; email: string; profilePicture?: string };
     recruiterId: { _id: string; name: string; email: string; profilePicture?: string };
+    interviewerId?: { _id: string; name: string; email: string; profilePicture?: string };
     jobId?: { _id: string; title: string; company: string };
     interviewerRemarks?: string;
     codingTestConducted?: boolean;
@@ -31,17 +34,8 @@ interface InterviewData {
     };
 }
 
-interface CandidateOption {
-    _id: string;
-    name: string;
-    email: string;
-}
-
-interface JobOption {
-    _id: string;
-    title: string;
-    company: string;
-}
+interface CandidateOption { _id: string; name: string; email: string; }
+interface JobOption { _id: string; title: string; company: string; }
 
 interface InterviewsTabProps {
     role: 'RECRUITER' | 'CANDIDATE' | 'INTERVIEWER';
@@ -54,6 +48,38 @@ const statusBadgeVariant: Record<string, 'info' | 'success' | 'warning' | 'dange
     Cancelled: 'danger',
 };
 
+// ─────────────────────────────────────────────────────────────
+// Avatar helper — shows photo if available, fallback to initials
+// ─────────────────────────────────────────────────────────────
+const Avatar: React.FC<{
+    name?: string;
+    photoUrl?: string;
+    size?: 'sm' | 'md';
+}> = ({ name, photoUrl, size = 'md' }) => {
+    const [imgError, setImgError] = useState(false);
+    const dim = size === 'md' ? 'w-12 h-12 text-lg' : 'w-10 h-10 text-sm';
+
+    if (photoUrl && !imgError) {
+        return (
+            <img
+                src={photoUrl}
+                alt={name || 'User'}
+                onError={() => setImgError(true)}
+                className={`${dim} rounded-full object-cover flex-shrink-0 border border-neutral-700`}
+            />
+        );
+    }
+
+    return (
+        <div className={`${dim} rounded-full bg-gradient-to-br from-[#7B2CBF] to-[#480CA8] flex items-center justify-center text-white font-bold flex-shrink-0`}>
+            {name?.charAt(0)?.toUpperCase() || <User size={size === 'md' ? 18 : 14} />}
+        </div>
+    );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────
 const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
     const navigate = useNavigate();
     const { addToast, ToastContainer } = useToast();
@@ -61,44 +87,30 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
     const [interviews, setInterviews] = useState<InterviewData[]>([]);
     const [loading, setLoading] = useState(true);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
-    const [showHistoryModal, setShowHistoryModal] = useState(false);
 
-    // AI Report modal state
+    // History search
+    const [historySearch, setHistorySearch] = useState('');
+
+    // AI Report modal
     const [selectedReport, setSelectedReport] = useState<InterviewData | null>(null);
 
-    // Schedule form state (Recruiter only)
+    // Schedule form (Recruiter only)
     const [candidates, setCandidates] = useState<CandidateOption[]>([]);
     const [jobs, setJobs] = useState<JobOption[]>([]);
     const [formData, setFormData] = useState({
-        candidateId: '',
-        jobId: '',
-        scheduledDate: '',
-        scheduledTime: '',
-        notes: '',
+        candidateId: '', jobId: '', scheduledDate: '', scheduledTime: '', notes: '',
     });
     const [scheduling, setScheduling] = useState(false);
 
-    // Fetch interviews
+    // ── Data fetching ────────────────────────────────────────
     useEffect(() => {
         fetchInterviews();
-
-        // Check for Stripe redirect query params
-        const query = new URLSearchParams(window.location.search);
-        if (query.get('payment') === 'success') {
-            addToast('success', 'Payment successful! Interview confirmed.');
-            // Clean up the URL
-            window.history.replaceState({}, document.title, window.location.pathname);
-        } else if (query.get('payment') === 'cancelled') {
-            addToast('warning', 'Payment was cancelled.');
-            window.history.replaceState({}, document.title, window.location.pathname);
-        }
     }, []);
 
     const fetchInterviews = async () => {
         try {
             setLoading(true);
             const data = await apiRequest('/interviews/my-interviews');
-            console.log('InterviewsTab fetched:', data);
             setInterviews(data);
         } catch (err: any) {
             addToast('error', err.message || 'Failed to load interviews');
@@ -107,26 +119,18 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
         }
     };
 
-    // Fetch candidates and jobs for scheduling (Recruiter)
-    // IMPORTANT: Decoupled fetches — each has its own try/catch so one failure doesn't break the other.
     const openScheduleModal = async () => {
         setShowScheduleModal(true);
-
-        // Fetch recruiter's jobs independently
         try {
             const jobsData = await apiRequest('/jobs/my-jobs');
             setJobs(jobsData || []);
         } catch (err: any) {
-            console.error('Failed to load jobs:', err);
             addToast('error', 'Failed to load your jobs');
         }
-
-        // Fetch eligible candidates (only those who applied to this recruiter's jobs) independently
         try {
             const candidatesData = await apiRequest('/interviews/eligible-candidates');
             setCandidates(candidatesData || []);
         } catch (err: any) {
-            console.error('Failed to load eligible candidates:', err);
             addToast('error', 'Failed to load eligible candidates');
         }
     };
@@ -136,24 +140,19 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
             addToast('error', 'Please fill in all required fields');
             return;
         }
-
         const scheduledDateObj = new Date(`${formData.scheduledDate}T${formData.scheduledTime}`);
         if (scheduledDateObj <= new Date()) {
             addToast('error', 'Please select a future date and time.');
             return;
         }
-
         setScheduling(true);
         try {
-            const scheduledTime = scheduledDateObj.toISOString();
-
             await apiRequest('/interviews/schedule', 'POST', {
                 candidateId: formData.candidateId,
                 jobId: formData.jobId || undefined,
-                scheduledTime,
+                scheduledTime: scheduledDateObj.toISOString(),
                 notes: formData.notes,
             });
-
             addToast('success', 'Interview scheduled successfully!');
             setShowScheduleModal(false);
             setFormData({ candidateId: '', jobId: '', scheduledDate: '', scheduledTime: '', notes: '' });
@@ -165,92 +164,93 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
         }
     };
 
-    const joinInterview = (meetingId: string) => {
-        navigate(`/interview/room/${meetingId}`);
-    };
-
-    const formatDate = (dateStr: string) => {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('en-US', {
-            weekday: 'short',
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-        });
-    };
-
-    const formatTime = (dateStr: string) => {
-        const date = new Date(dateStr);
-        return date.toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    };
-
-    const isJoinable = (interview: InterviewData) => {
-        return interview.status === 'Scheduled' || interview.status === 'InProgress';
-    };
-
-    const handlePayment = async (interviewId: string) => {
-        try {
-            const res = await apiRequest('/payments/create-checkout-session', 'POST', { interviewId });
-            if (res.url) {
-                window.location.href = res.url; // Redirect to Stripe Checkout
-            }
-        } catch (error: any) {
-            addToast('error', error.message || 'Payment initiation failed');
-        }
-    };
-
-    const handleDelete = async (interviewId: string) => {
-        if (!window.confirm("Are you sure you want to cancel this interview? This action cannot be undone.")) return;
+    // Soft-cancel — backend sets status='Cancelled', record persists in history
+    const handleCancel = async (interviewId: string) => {
+        if (!window.confirm('Are you sure you want to cancel this interview?')) return;
         try {
             await apiRequest(`/interviews/${interviewId}`, 'DELETE');
-            addToast('success', 'Interview cancelled successfully');
-            fetchInterviews();
+            addToast('success', 'Interview cancelled — moved to history');
+            // Optimistic update: flip status locally so UI reflects immediately
+            setInterviews(prev =>
+                prev.map(i => i._id === interviewId ? { ...i, status: 'Cancelled' } : i)
+            );
         } catch (err: any) {
             addToast('error', err.message || 'Failed to cancel interview');
         }
     };
 
-    // Split interviews into upcoming vs past
+    // ── Helpers ──────────────────────────────────────────────
+    const joinInterview = (meetingId: string) => navigate(`/interview/room/${meetingId}`);
+    const isJoinable = (i: InterviewData) => i.status === 'Scheduled' || i.status === 'InProgress';
+
+    const formatDate = (s: string) =>
+        new Date(s).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    const formatTime = (s: string) =>
+        new Date(s).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+    // ── Splitting logic (status-first, date as tiebreaker) ───
     const now = new Date();
-    
-    // Parse user from local storage to check ID
     const userString = localStorage.getItem('user');
     const currentUser = userString ? JSON.parse(userString) : null;
 
+    const TERMINAL_STATUSES = ['Completed', 'Cancelled'];
+
     const upcomingInterviews = interviews.filter((i) => {
-        const isFuture = new Date(i.scheduledTime) >= now;
-        const isNotCancelled = i.status !== 'Cancelled';
-        
+        // Status-first: completed/cancelled ALWAYS go to history
+        if (TERMINAL_STATUSES.includes(i.status)) return false;
+        // Pending goes to history too (not yet confirmed)
+        if (i.status === 'Pending') return false;
+        // Past-due (but not terminal) also go to history
+        if (new Date(i.scheduledTime) < now) return false;
+        // Recruiter: hide delegated interviews
         if (role === 'RECRUITER' && currentUser) {
-            // Hide delegated interviews (where a different interviewer is assigned)
-            const isDelegated = i.interviewerId && i.interviewerId._id && i.interviewerId._id !== String(currentUser.id || currentUser._id);
+            const myId = String(currentUser.id || currentUser._id);
+            const isDelegated = i.interviewerId && i.interviewerId._id && i.interviewerId._id !== myId;
             if (isDelegated) return false;
-            // Also hide strictly pending bookings since they aren't finalized
-            if (i.status === 'Pending') return false; 
         }
-        
-        return isFuture && isNotCancelled;
+        return true;
     });
-    const pastInterviews = interviews.filter(
-        (i) => new Date(i.scheduledTime) < now || i.status === 'Cancelled' || i.status === 'Completed'
+
+    const pastInterviews = interviews.filter((i) =>
+        TERMINAL_STATUSES.includes(i.status) || new Date(i.scheduledTime) < now
     );
 
+    // ── Filtered history (search bar) ───────────────────────
+    const filteredHistory = pastInterviews.filter((i) => {
+        if (!historySearch.trim()) return true;
+        const q = historySearch.toLowerCase();
+        const otherPerson = role === 'RECRUITER' ? i.candidateId?.name : i.recruiterId?.name;
+        return (
+            otherPerson?.toLowerCase().includes(q) ||
+            formatDate(i.scheduledTime).toLowerCase().includes(q) ||
+            i.status.toLowerCase().includes(q) ||
+            i.jobId?.title?.toLowerCase().includes(q)
+        );
+    });
+
+    // ── Person shown for this role ───────────────────────────
+    const getOtherPerson = (i: InterviewData) =>
+        role === 'RECRUITER' ? i.candidateId : i.recruiterId;
+
+    // ─────────────────────────────────────────────────────────
+    // Loading state
+    // ─────────────────────────────────────────────────────────
     if (loading) {
         return (
             <div className="flex items-center justify-center py-20">
-                <div className="w-8 h-8 border-3 border-[#7B2CBF] border-t-transparent rounded-full animate-spin" />
+                <div className="w-8 h-8 border-2 border-[#7B2CBF] border-t-transparent rounded-full animate-spin" />
             </div>
         );
     }
 
+    // ─────────────────────────────────────────────────────────
+    // Render
+    // ─────────────────────────────────────────────────────────
     return (
         <div className="space-y-6">
             <ToastContainer />
 
-            {/* Header */}
+            {/* ── Header ─────────────────────────────────── */}
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-2xl font-bold text-white">Interviews</h2>
@@ -267,12 +267,13 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                 )}
             </div>
 
-            {/* Upcoming Interviews */}
-            <div>
+            {/* ── Upcoming Interviews ─────────────────────── */}
+            <section>
                 <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
                     <Calendar size={18} className="text-[#7B2CBF]" />
                     Upcoming
                 </h3>
+
                 {upcomingInterviews.length === 0 ? (
                     <Card>
                         <div className="text-center py-8">
@@ -287,162 +288,195 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                     </Card>
                 ) : (
                     <div className="grid gap-3">
-                        {upcomingInterviews.map((interview) => (
-                            <Card key={interview._id} className="hover:border-[#7B2CBF]/30 transition-all">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-4">
-                                        {/* Avatar */}
-                                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#7B2CBF] to-[#480CA8] flex items-center justify-center text-white font-bold text-lg">
-                                            {(role === 'RECRUITER'
-                                                ? interview.candidateId?.name
-                                                : interview.recruiterId?.name
-                                            )?.charAt(0)?.toUpperCase() || '?'}
-                                        </div>
-
-                                        <div>
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <h4 className="font-semibold text-white">
-                                                    {role === 'RECRUITER'
-                                                        ? interview.candidateId?.name
-                                                        : interview.recruiterId?.name}
-                                                </h4>
-                                                <Badge variant={statusBadgeVariant[interview.status] || 'neutral'}>
-                                                    {interview.status}
-                                                </Badge>
-                                                {role === 'RECRUITER' && interview.paymentStatus && (
-                                                    <Badge variant={interview.paymentStatus === 'Paid' ? 'success' : 'warning'}>
-                                                        {interview.paymentStatus}
+                        {upcomingInterviews.map((interview) => {
+                            const other = getOtherPerson(interview);
+                            return (
+                                <Card key={interview._id} className="hover:border-[#7B2CBF]/30 transition-all">
+                                    <div className="flex items-center justify-between gap-4">
+                                        {/* Left: avatar + info */}
+                                        <div className="flex items-center gap-4 min-w-0">
+                                            <Avatar
+                                                name={other?.name}
+                                                photoUrl={other?.profilePicture}
+                                                size="md"
+                                            />
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                    <h4 className="font-semibold text-white truncate">{other?.name}</h4>
+                                                    <Badge variant={statusBadgeVariant[interview.status] || 'neutral'}>
+                                                        {interview.status}
                                                     </Badge>
-                                                )}
-                                            </div>
-                                            <div className="flex items-center gap-4 text-sm text-neutral-400">
-                                                <span className="flex items-center gap-1">
-                                                    <Calendar size={13} />
-                                                    {formatDate(interview.scheduledTime)}
-                                                </span>
-                                                <span className="flex items-center gap-1">
-                                                    <Clock size={13} />
-                                                    {formatTime(interview.scheduledTime)}
-                                                </span>
-                                                {interview.jobId && (
+                                                </div>
+                                                <div className="flex items-center gap-4 text-sm text-neutral-400 flex-wrap">
                                                     <span className="flex items-center gap-1">
-                                                        <Briefcase size={13} />
-                                                        {interview.jobId.title}
+                                                        <Calendar size={13} />
+                                                        {formatDate(interview.scheduledTime)}
                                                     </span>
-                                                )}
+                                                    <span className="flex items-center gap-1">
+                                                        <Clock size={13} />
+                                                        {formatTime(interview.scheduledTime)}
+                                                    </span>
+                                                    {interview.jobId && (
+                                                        <span className="flex items-center gap-1 truncate">
+                                                            <Briefcase size={13} />
+                                                            {interview.jobId.title}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
 
-                                    <div className="flex gap-2 items-center">
-                                        {role === 'RECRUITER' && interview.paymentStatus === 'Unpaid' && (
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                className="border-green-500 text-green-500 hover:bg-green-500/10"
-                                                onClick={() => handlePayment(interview._id)}
-                                            >
-                                                Pay & Confirm
-                                            </Button>
-                                        )}
-                                        {role === 'RECRUITER' && (
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                className="border-red-500/50 text-red-500 hover:bg-red-500/10"
-                                                onClick={() => handleDelete(interview._id)}
-                                            >
-                                                Cancel
-                                            </Button>
-                                        )}
-                                        {isJoinable(interview) && (
-                                            <Button
-                                                variant="secondary"
-                                                size="sm"
-                                                icon={Video}
-                                                onClick={() => joinInterview(interview.meetingId)}
-                                            >
-                                                Join Room
-                                            </Button>
-                                        )}
+                                        {/* Right: actions */}
+                                        <div className="flex gap-2 items-center flex-shrink-0">
+                                            {role === 'RECRUITER' && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="border-red-500/50 text-red-500 hover:bg-red-500/10"
+                                                    onClick={() => handleCancel(interview._id)}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            )}
+                                            {isJoinable(interview) && (
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    icon={Video}
+                                                    onClick={() => joinInterview(interview.meetingId)}
+                                                >
+                                                    Join Room
+                                                </Button>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            </Card>
-                        ))}
+                                </Card>
+                            );
+                        })}
                     </div>
                 )}
-            </div>
+            </section>
 
-            {/* History Summary & Button */}
+            {/* ── Interview History (inline, no modal) ────── */}
             {pastInterviews.length > 0 && (
-                <div className="pt-6 mt-6 border-t border-neutral-800 flex items-center justify-between">
-                    <div>
-                        <h3 className="text-lg font-semibold text-white">Interview History</h3>
-                        <p className="text-sm text-neutral-400">View your completed, cancelled, or past interviews.</p>
+                <section className="pt-6 mt-2 border-t border-neutral-800">
+                    {/* Section header */}
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <Clock size={18} className="text-neutral-500" />
+                            Interview History
+                            <span className="text-xs font-normal text-neutral-600 bg-neutral-800 px-2 py-0.5 rounded-full">
+                                {pastInterviews.length}
+                            </span>
+                        </h3>
                     </div>
-                    <Button variant="outline" icon={Clock} onClick={() => setShowHistoryModal(true)}>
-                        View Past Interviews
-                    </Button>
-                </div>
-            )}
 
-            {/* History Modal */}
-            <Modal
-                isOpen={showHistoryModal}
-                onClose={() => setShowHistoryModal(false)}
-                title="Interview History"
-            >
-                <div className="grid gap-3 max-h-[60vh] overflow-y-auto pr-2 pb-4">
-                    {pastInterviews.map((interview) => (
-                        <Card key={interview._id} className="opacity-80 border-neutral-800">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-neutral-500 font-bold shrink-0">
-                                        {(role === 'RECRUITER'
-                                            ? interview.candidateId?.name
-                                            : interview.recruiterId?.name
-                                        )?.charAt(0)?.toUpperCase() || '?'}
-                                    </div>
-                                    <div>
-                                        <h4 className="font-medium text-neutral-300">
-                                            {role === 'RECRUITER'
-                                                ? interview.candidateId?.name
-                                                : interview.recruiterId?.name}
-                                        </h4>
-                                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500 mt-1">
-                                            <span>{formatDate(interview.scheduledTime)}</span>
-                                            {interview.jobId && <span>{interview.jobId.title}</span>}
+                    {/* Search bar */}
+                    <div className="relative mb-4">
+                        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
+                        <input
+                            type="text"
+                            value={historySearch}
+                            onChange={(e) => setHistorySearch(e.target.value)}
+                            placeholder="Search by name, date, status, or job title…"
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl py-2.5 pl-9 pr-9 text-sm text-white placeholder-neutral-600 focus:border-[#7B2CBF] focus:ring-1 focus:ring-[#7B2CBF] transition-all outline-none"
+                        />
+                        {historySearch && (
+                            <button
+                                onClick={() => setHistorySearch('')}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white transition-colors"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+
+                    {/* History list */}
+                    {filteredHistory.length === 0 ? (
+                        <div className="text-center py-8">
+                            <Search size={32} className="text-neutral-700 mx-auto mb-2" />
+                            <p className="text-neutral-500 text-sm">No interviews match "{historySearch}"</p>
+                        </div>
+                    ) : (
+                        <div className="grid gap-2">
+                            {filteredHistory.map((interview) => {
+                                const other = getOtherPerson(interview);
+                                return (
+                                    <div
+                                        key={interview._id}
+                                        className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-neutral-900/50 border border-neutral-800/60 hover:border-neutral-700 transition-all"
+                                    >
+                                        {/* Left: avatar + info */}
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <Avatar
+                                                name={other?.name}
+                                                photoUrl={other?.profilePicture}
+                                                size="sm"
+                                            />
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-neutral-300 truncate">
+                                                    {other?.name}
+                                                </p>
+                                                <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap text-xs text-neutral-500 mt-0.5">
+                                                    <span>{formatDate(interview.scheduledTime)}</span>
+                                                    <span>{formatTime(interview.scheduledTime)}</span>
+                                                    {interview.jobId && (
+                                                        <span className="flex items-center gap-1 truncate">
+                                                            <Briefcase size={11} />
+                                                            {interview.jobId.title}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Right: badge + AI report */}
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                            {interview.status === 'Completed' && interview.aiEvaluation && (
+                                                <button
+                                                    onClick={() => setSelectedReport(interview)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#7B2CBF]/10 border border-[#7B2CBF]/30 hover:bg-[#7B2CBF]/20 rounded-lg transition-colors text-xs font-semibold text-[#9D4EDD] whitespace-nowrap"
+                                                >
+                                                    <Award size={12} />
+                                                    AI Report
+                                                </button>
+                                            )}
+                                            <Badge variant={statusBadgeVariant[interview.status] || 'neutral'}>
+                                                {interview.status}
+                                            </Badge>
                                         </div>
                                     </div>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0 ml-4">
-                                    {/* AI Report Button — only for completed interviews with evaluation */}
-                                    {interview.status === 'Completed' && interview.aiEvaluation && (
-                                        <button
-                                            onClick={() => setSelectedReport(interview)}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#7B2CBF]/10 border border-[#7B2CBF]/30 hover:bg-[#7B2CBF]/20 rounded-lg transition-colors text-xs font-semibold text-[#9D4EDD]"
-                                        >
-                                            <Award size={13} />
-                                            AI Report
-                                        </button>
-                                    )}
-                                    <Badge variant={statusBadgeVariant[interview.status] || 'neutral'}>
-                                        {interview.status}
-                                    </Badge>
-                                </div>
-                            </div>
-                        </Card>
-                    ))}
-                </div>
-            </Modal>
+                                );
+                            })}
+                        </div>
+                    )}
+                </section>
+            )}
 
-            {/* AI Report Detail Modal */}
+            {/* ── AI Report Detail Modal ─────────────────── */}
             {selectedReport && selectedReport.aiEvaluation && (
-                <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
+                <div
+                    className="fixed inset-0 z-[9999] flex items-center justify-center"
+                    style={{ backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+                    onClick={(e) => { if (e.target === e.currentTarget) setSelectedReport(null); }}
+                >
                     <div className="bg-neutral-900 border border-neutral-700 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] overflow-y-auto">
                         {/* Header */}
                         <div className="sticky top-0 bg-neutral-900/95 backdrop-blur-md px-6 py-4 border-b border-neutral-800 flex items-center justify-between z-10">
-                            <h2 className="text-lg font-bold text-white">AI Interview Report</h2>
+                            <div className="flex items-center gap-3">
+                                <Avatar
+                                    name={getOtherPerson(selectedReport)?.name}
+                                    photoUrl={getOtherPerson(selectedReport)?.profilePicture}
+                                    size="sm"
+                                />
+                                <div>
+                                    <h2 className="text-base font-bold text-white">AI Interview Report</h2>
+                                    <p className="text-xs text-neutral-500">
+                                        {getOtherPerson(selectedReport)?.name}
+                                        {selectedReport.jobId ? ` · ${selectedReport.jobId.title}` : ''}
+                                    </p>
+                                </div>
+                            </div>
                             <button
                                 onClick={() => setSelectedReport(null)}
                                 className="w-8 h-8 rounded-lg bg-neutral-800 hover:bg-neutral-700 flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
@@ -450,16 +484,11 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                                 <X size={16} />
                             </button>
                         </div>
-
-                        {/* Report Content */}
+                        {/* Content */}
                         <div className="px-6 py-5">
                             <AIReportCard
                                 evaluation={selectedReport.aiEvaluation}
-                                candidateName={
-                                    role === 'RECRUITER'
-                                        ? selectedReport.candidateId?.name
-                                        : selectedReport.recruiterId?.name
-                                }
+                                candidateName={getOtherPerson(selectedReport)?.name}
                                 jobTitle={selectedReport.jobId?.title}
                                 interviewerRemarks={selectedReport.interviewerRemarks}
                                 codingTestConducted={selectedReport.codingTestConducted}
@@ -469,14 +498,14 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                 </div>
             )}
 
-            {/* Schedule Interview Modal (Recruiter only) */}
+            {/* ── Schedule Interview Modal (Recruiter only) ── */}
             <Modal
                 isOpen={showScheduleModal}
                 onClose={() => setShowScheduleModal(false)}
                 title="Schedule Interview"
             >
                 <div className="space-y-4">
-                    {/* Candidate Select */}
+                    {/* Candidate */}
                     <div>
                         <label className="block text-sm font-medium text-neutral-400 mb-1.5">
                             Candidate <span className="text-red-400">*</span>
@@ -488,14 +517,12 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                         >
                             <option value="">Select a candidate...</option>
                             {candidates.map((c) => (
-                                <option key={c._id} value={c._id}>
-                                    {c.name} ({c.email})
-                                </option>
+                                <option key={c._id} value={c._id}>{c.name} ({c.email})</option>
                             ))}
                         </select>
                     </div>
 
-                    {/* Job Select (Optional) */}
+                    {/* Job (optional) */}
                     <div>
                         <label className="block text-sm font-medium text-neutral-400 mb-1.5">Job (Optional)</label>
                         <select
@@ -505,9 +532,7 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                         >
                             <option value="">No specific job</option>
                             {jobs.map((j) => (
-                                <option key={j._id} value={j._id}>
-                                    {j.title} — {j.company}
-                                </option>
+                                <option key={j._id} value={j._id}>{j.title} — {j.company}</option>
                             ))}
                         </select>
                     </div>

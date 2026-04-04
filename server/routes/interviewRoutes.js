@@ -200,7 +200,7 @@ router.patch('/:id/status', protect, async (req, res) => {
     }
 });
 
-// Delete Interview
+// Cancel Interview (Soft Delete — sets status to Cancelled, record persists)
 router.delete('/:id', protect, authorize('RECRUITER'), async (req, res) => {
     try {
         const interview = await Interview.findById(req.params.id);
@@ -209,16 +209,21 @@ router.delete('/:id', protect, authorize('RECRUITER'), async (req, res) => {
         }
 
         if (interview.recruiterId.toString() !== req.user._id.toString() && req.user.role !== 'ADMIN') {
-            return res.status(403).json({ message: 'Not authorized to delete this interview' });
+            return res.status(403).json({ message: 'Not authorized to cancel this interview' });
         }
 
-        await Interview.deleteOne({ _id: interview._id });
-        res.json({ message: 'Interview deleted successfully' });
+        // Soft delete — preserve the record, move it to history
+        interview.status = 'Cancelled';
+        await interview.save();
+
+        console.log(`[Interview] Soft-cancelled interview ${interview._id} by ${req.user.name}`);
+        res.json({ message: 'Interview cancelled successfully', interview });
     } catch (err) {
-        console.error('Delete interview error:', err);
-        res.status(500).json({ message: 'Failed to delete interview' });
+        console.error('Cancel interview error:', err);
+        res.status(500).json({ message: 'Failed to cancel interview' });
     }
 });
+
 
 // Submit Interview Feedback
 router.post('/:id/feedback', protect, authorize('freelancer', 'INTERVIEWER', 'ADMIN', 'RECRUITER'), async (req, res) => {
