@@ -30,7 +30,20 @@ const interviewSchema = new mongoose.Schema({
     detailedFeedback: { type: String },
     recommendation: { type: String, enum: ['Strong Hire', 'Hire', 'No Hire'] }
   },
+  // ── AI Post-Interview Evaluation ──────────────────────────────────────
+  codingTestSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestSession' },
+  codingTestConducted: { type: Boolean, default: false },
+  interviewerRemarks: { type: String, default: '' },
+  aiEvaluation: {
+    suitabilityScore: { type: Number, min: 0, max: 100 },
+    strengths: [{ type: String }],
+    weaknesses: [{ type: String }],
+    redFlags: [{ type: String }],
+    codingScore: { type: Number, default: 0 },
+    evaluatedAt: { type: Date },
+  },
   createdAt: { type: Date, default: Date.now }
 });
 
 module.exports = mongoose.model('Interview', interviewSchema);
+

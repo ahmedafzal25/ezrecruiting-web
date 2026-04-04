@@ -388,6 +388,47 @@ io.on('connection', (socket) => {
     socket.to(interviewId).emit('adaptive-test-sync', data);
   });
 
+  // --- End Interview (Host completes the interview — kicks everyone) ---
+  socket.on('end-interview', ({ meetingId }) => {
+    const interviewId = meetingId || socket.currentRoom;
+    if (!interviewId) return;
+
+    console.log(`[Socket.IO] 🏁 ${socket.userName} triggered end-interview for room: ${interviewId}`);
+
+    // Broadcast to ALL sockets in the room (including sender via io.in)
+    io.in(interviewId).emit('interview-ended', {
+      message: 'This interview has been completed by the host.',
+      endedBy: socket.userName,
+    });
+
+    // Clean up room state
+    const roomUsers = activeRooms.get(interviewId);
+    if (roomUsers) {
+      roomUsers.forEach((user) => {
+        const userSocket = io.sockets.sockets.get(user.socketId);
+        if (userSocket) {
+          userSocket.leave(interviewId);
+        }
+      });
+      activeRooms.delete(interviewId);
+    }
+
+    const wUsers = waitingRooms.get(interviewId);
+    if (wUsers) {
+      waitingRooms.delete(interviewId);
+    }
+
+    console.log(`[Socket.IO] 🏁 Room ${interviewId} closed and all participants notified.`);
+  });
+
+  // --- Coding Test Visibility Sync (Host broadcasts to participants) ---
+  socket.on('coding-test-started-event', ({ roomId }) => {
+    const interviewId = roomId || socket.currentRoom;
+    if (!interviewId) return;
+    console.log(`[Socket.IO] 📝 ${socket.userName} started coding test in room: ${interviewId}`);
+    socket.to(interviewId).emit('coding-test-started');
+  });
+
   // --- Disconnect ---
   socket.on('disconnect', () => {
     console.log(`[Socket.IO] User disconnected: ${socket.userName} (${socket.userId})`);

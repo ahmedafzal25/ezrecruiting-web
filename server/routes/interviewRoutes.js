@@ -3,9 +3,14 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const Interview = require('../models/Interview');
+const TestSession = require('../models/TestSession');
 const Message = require('../models/Message');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const { getEligibleCandidates } = require('../controllers/interviewController');
+
+// AI Service URL from environment
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+
 
 // ============================
 // Interview Routes
@@ -195,7 +200,7 @@ router.patch('/:id/status', protect, async (req, res) => {
     }
 });
 
-// Delete Interview
+// Cancel Interview (Soft Delete — sets status to Cancelled, record persists)
 router.delete('/:id', protect, authorize('RECRUITER'), async (req, res) => {
     try {
         const interview = await Interview.findById(req.params.id);
@@ -204,16 +209,21 @@ router.delete('/:id', protect, authorize('RECRUITER'), async (req, res) => {
         }
 
         if (interview.recruiterId.toString() !== req.user._id.toString() && req.user.role !== 'ADMIN') {
-            return res.status(403).json({ message: 'Not authorized to delete this interview' });
+            return res.status(403).json({ message: 'Not authorized to cancel this interview' });
         }
 
-        await Interview.deleteOne({ _id: interview._id });
-        res.json({ message: 'Interview deleted successfully' });
+        // Soft delete — preserve the record, move it to history
+        interview.status = 'Cancelled';
+        await interview.save();
+
+        console.log(`[Interview] Soft-cancelled interview ${interview._id} by ${req.user.name}`);
+        res.json({ message: 'Interview cancelled successfully', interview });
     } catch (err) {
-        console.error('Delete interview error:', err);
-        res.status(500).json({ message: 'Failed to delete interview' });
+        console.error('Cancel interview error:', err);
+        res.status(500).json({ message: 'Failed to cancel interview' });
     }
 });
+
 
 // Submit Interview Feedback
 router.post('/:id/feedback', protect, authorize('freelancer', 'INTERVIEWER', 'ADMIN', 'RECRUITER'), async (req, res) => {
@@ -372,4 +382,179 @@ router.post('/:id/proctor-log', protect, async (req, res) => {
     }
 });
 
+// ============================
+// Complete Interview — AI Report Pipeline (Phase 2 Coordinator)
+// ============================
+router.post('/:id/complete', protect, async (req, res) => {
+    try {
+        const { interviewerRemarks } = req.body;
+
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`[Complete] 🚀 Starting interview completion for ${req.params.id}`);
+        console.log(`[Complete]   Triggered by: ${req.user.name} (${req.user.role})`);
+        console.log(`[Complete]   Remarks length: ${(interviewerRemarks || '').length} chars`);
+
+        // ── Step 1: Fetch and validate interview ────────────────────────────
+        const interview = await Interview.findById(req.params.id)
+            .populate('candidateId', 'name email')
+            .populate('recruiterId', 'name email')
+            .populate('interviewerId', 'name email')
+            .populate('jobId', 'title company');
+
+        if (!interview) {
+            console.log(`[Complete] ❌ Interview not found: ${req.params.id}`);
+            return res.status(404).json({ message: 'Interview not found' });
+        }
+
+        // Validate the user is a host (recruiter, interviewer, or admin)
+        const userId = req.user._id.toString();
+        const isRecruiter = interview.recruiterId?._id?.toString() === userId;
+        const isInterviewer = interview.interviewerId?._id?.toString() === userId;
+        const isAdmin = req.user.role === 'ADMIN';
+
+        if (!isRecruiter && !isInterviewer && !isAdmin) {
+            console.log(`[Complete] ❌ Unauthorized: ${userId} is not a host for this interview`);
+            return res.status(403).json({ message: 'Only the host (recruiter/interviewer) can complete this interview' });
+        }
+
+        console.log(`[Complete]   Candidate: ${interview.candidateId?.name || 'Unknown'}`);
+        console.log(`[Complete]   Job: ${interview.jobId?.title || 'No job linked'}`);
+        console.log(`[Complete]   Current status: ${interview.status}`);
+
+        // ── Step 2: End any active coding test session ──────────────────────
+        let codingScore = 0;
+        let codingTestConducted = interview.codingTestConducted || false;
+        let candidateCode = '';
+
+        if (interview.jobId?._id && interview.candidateId?._id) {
+            console.log(`[Complete] 🔍 Looking for active coding test session...`);
+
+            const testSession = await TestSession.findOne({
+                candidateId: interview.candidateId._id,
+                jobId: interview.jobId._id,
+            }).sort({ startedAt: -1 }); // Get most recent session
+
+            if (testSession) {
+                codingTestConducted = true;
+                console.log(`[Complete]   Found test session: ${testSession._id} (status: ${testSession.status})`);
+
+                if (testSession.status === 'in_progress') {
+                    // Finalize the session — compute score from responses so far
+                    const totalScore = testSession.responses.reduce((sum, r) => sum + (r.score || 0), 0);
+                    testSession.finalScore = testSession.responses.length > 0
+                        ? Math.round(totalScore / testSession.responses.length)
+                        : 0;
+                    testSession.status = 'completed';
+                    testSession.completedAt = new Date();
+                    await testSession.save();
+
+                    console.log(`[Complete]   ✅ Coding test finalized. Score: ${testSession.finalScore}% (${testSession.responses.length} questions answered)`);
+                } else {
+                    console.log(`[Complete]   Coding test already completed. Score: ${testSession.finalScore}%`);
+                }
+
+                codingScore = testSession.finalScore || 0;
+                interview.codingTestSessionId = testSession._id;
+                interview.codingTestConducted = true;
+
+                // Gather last submitted code for the AI
+                const lastResponse = testSession.responses[testSession.responses.length - 1];
+                candidateCode = lastResponse?.submittedCode || '';
+            } else {
+                console.log(`[Complete]   No coding test session found for this candidate/job combination.`);
+                codingTestConducted = false;
+            }
+        } else {
+            console.log(`[Complete]   No job linked — skipping coding test lookup.`);
+            codingTestConducted = false;
+        }
+
+        // ── Step 3: Build AI payload ────────────────────────────────────────
+        const aiPayload = {
+            interviewId: interview._id.toString(),
+            candidateCode: candidateCode,
+            codingScore: codingScore,
+            codingTestConducted: codingTestConducted,
+            proctorEvents: (interview.proctorLog || []).map(e => ({
+                type: e.type,
+                detail: e.detail || '',
+                timestamp: e.timestamp ? e.timestamp.toISOString() : '',
+            })),
+            interviewerNotes: interviewerRemarks || interview.notes || '',
+        };
+
+        console.log(`[Complete] 📦 AI Payload built:`);
+        console.log(`[Complete]   Code: ${aiPayload.candidateCode.length} chars`);
+        console.log(`[Complete]   Coding score: ${aiPayload.codingScore} (conducted: ${aiPayload.codingTestConducted})`);
+        console.log(`[Complete]   Proctor events: ${aiPayload.proctorEvents.length}`);
+        console.log(`[Complete]   Interviewer notes: ${aiPayload.interviewerNotes.length} chars`);
+
+        // ── Step 4: Call AI Evaluation Service ──────────────────────────────
+        let aiResult = null;
+        try {
+            console.log(`[Complete] 🤖 Calling AI service at ${AI_SERVICE_URL}/api/ai/evaluate-interview ...`);
+
+            const aiResponse = await fetch(`${AI_SERVICE_URL}/api/ai/evaluate-interview`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(aiPayload),
+            });
+
+            if (!aiResponse.ok) {
+                const errText = await aiResponse.text();
+                throw new Error(`AI Service responded with ${aiResponse.status}: ${errText}`);
+            }
+
+            aiResult = await aiResponse.json();
+            console.log(`[Complete] ✅ AI evaluation received. Suitability score: ${aiResult.suitabilityScore}`);
+            console.log(`[Complete]   Strengths: ${aiResult.strengths?.length || 0}`);
+            console.log(`[Complete]   Weaknesses: ${aiResult.weaknesses?.length || 0}`);
+            console.log(`[Complete]   Red flags: ${aiResult.redFlags?.length || 0}`);
+        } catch (aiError) {
+            console.error(`[Complete] ⚠️ AI Service call failed:`, aiError.message);
+            console.log(`[Complete]   Continuing with fallback (no AI evaluation).`);
+            // Fallback: generate a basic evaluation without the AI
+            aiResult = {
+                suitabilityScore: codingTestConducted ? codingScore : 50,
+                strengths: ['Interview completed — detailed AI analysis unavailable'],
+                weaknesses: ['AI evaluation service was unreachable'],
+                redFlags: (interview.proctorLog || []).length > 5
+                    ? ['High number of proctoring events detected']
+                    : [],
+            };
+        }
+
+        // ── Step 5: Save evaluation to Interview record ─────────────────────
+        interview.aiEvaluation = {
+            suitabilityScore: aiResult.suitabilityScore,
+            strengths: aiResult.strengths || [],
+            weaknesses: aiResult.weaknesses || [],
+            redFlags: aiResult.redFlags || [],
+            codingScore: codingScore,
+            evaluatedAt: new Date(),
+        };
+        interview.interviewerRemarks = interviewerRemarks || '';
+        interview.status = 'Completed';
+
+        await interview.save();
+
+        console.log(`[Complete] 💾 Interview ${req.params.id} saved as Completed.`);
+        console.log(`[Complete]   AI suitability score: ${interview.aiEvaluation.suitabilityScore}`);
+        console.log(`${'='.repeat(60)}\n`);
+
+        // ── Step 6: Return full updated interview ───────────────────────────
+        const populated = await Interview.findById(interview._id)
+            .populate('candidateId', 'name email profilePicture')
+            .populate('recruiterId', 'name email profilePicture')
+            .populate('interviewerId', 'name email profilePicture')
+            .populate('jobId', 'title company');
+
+        res.json(populated);
+    } catch (err) {
+        console.error('[Complete] ❌ Error completing interview:', err);
+        res.status(500).json({ message: 'Failed to complete interview', error: err.message });
+    }
+});
+
 module.exports = router;
+

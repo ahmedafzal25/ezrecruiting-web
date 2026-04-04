@@ -4,7 +4,8 @@ import { io, Socket } from 'socket.io-client';
 import Editor from '@monaco-editor/react';
 import {
     Mic, MicOff, Video, VideoOff, PhoneOff,
-    Monitor, Code, Users, Maximize2, Minimize2, UserX, Eye, ShieldAlert
+    Monitor, Code, Users, Maximize2, Minimize2, UserX, Eye, ShieldAlert,
+    CheckCircle, X, ClipboardCheck, PlayCircle
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { apiRequest } from '../utils/api';
@@ -151,6 +152,20 @@ const VIDEO_GRID_STYLES = `
     align-items: center;
     justify-content: center;
   }
+
+  /* Sidebar mode — compact vertical stack for when coding panel is visible */
+  .video-grid.sidebar-mode {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 12px;
+    padding-bottom: 80px;
+    align-content: start;
+  }
+  .video-grid.sidebar-mode .video-tile {
+    min-height: 140px;
+    max-height: 35vh;
+    border-radius: 12px;
+  }
 `;
 
 const InterviewRoom: React.FC = () => {
@@ -195,6 +210,14 @@ const InterviewRoom: React.FC = () => {
     const [adaptiveSession, setAdaptiveSession] = useState<any>(null);
     const [lastEvaluation, setLastEvaluation] = useState<any>(null);
     const [evaluating, setEvaluating] = useState(false);
+
+    // **** Dynamic Layout: Coding test visible only after host starts it ****
+    const [isCodingTestVisible, setIsCodingTestVisible] = useState(false);
+
+    // **** End Interview Modal State ****
+    const [showEndInterviewModal, setShowEndInterviewModal] = useState(false);
+    const [completingInterview, setCompletingInterview] = useState(false);
+    const [interviewerRemarks, setInterviewerRemarks] = useState('');
 
     // Remote streams — one entry per connected peer
     const [remoteStreams, setRemoteStreams] = useState<RemoteStream[]>([]);
@@ -677,6 +700,41 @@ const InterviewRoom: React.FC = () => {
                     navigate(dashboardPath);
                 }, 1500);
             });
+
+            // ==============================
+            // Interview Ended (Host completed interview — everyone ejected)
+            // ==============================
+            socket.on('interview-ended', ({ message, endedBy }) => {
+                if (!isMounted) return;
+                addToast('info', `✅ ${message || 'This interview has been completed.'}`);
+                // Clean up all connections
+                peerConnectionsRef.current.forEach((pc) => pc.close());
+                peerConnectionsRef.current.clear();
+                if (localStreamRef.current) {
+                    localStreamRef.current.getTracks().forEach((t) => t.stop());
+                }
+                if (screenStreamRef.current) {
+                    screenStreamRef.current.getTracks().forEach((t) => t.stop());
+                }
+                socket.disconnect();
+                // Redirect to dashboard after delay
+                setTimeout(() => {
+                    const isFreelancer = user?.role === 'INTERVIEWER' || user?.role === 'freelancer';
+                    const dashboardPath = isFreelancer
+                        ? '/interviewer'
+                        : (user?.role === 'RECRUITER' ? '/recruiter/schedule' : '/candidate/interviews');
+                    navigate(dashboardPath);
+                }, 2000);
+            });
+
+            // ==============================
+            // Coding test visibility sync (host broadcasts to participants)
+            // ==============================
+            socket.on('coding-test-started', () => {
+                if (!isMounted) return;
+                setIsCodingTestVisible(true);
+                addToast('info', '📝 Coding test has been started by the host.');
+            });
         };
 
         initRoom();
@@ -808,7 +866,13 @@ const InterviewRoom: React.FC = () => {
     };
 
     const endCall = async () => {
-        // Flush proctoring logs to the backend before disconnecting
+        // If user is a host (recruiter/interviewer), show the "Complete Interview" modal
+        if (isRecruiter) {
+            setShowEndInterviewModal(true);
+            return;
+        }
+
+        // Non-host (candidate): just leave the call
         if (!isRecruiter && interview?._id) {
             console.log('[InterviewRoom] Flushing proctoring logs before leaving...');
             try {
@@ -830,12 +894,82 @@ const InterviewRoom: React.FC = () => {
         if (socketRef.current) {
             socketRef.current.disconnect();
         }
-        const isFreelancer = user?.role === 'INTERVIEWER' || user?.role === 'freelancer';
-        const dashboardPath = isFreelancer 
-            ? `/interviewer/feedback/${interview?._id}`
-            : (user?.role === 'RECRUITER' ? '/recruiter/schedule' : '/candidate/interviews');
-            
+        const dashboardPath = user?.role === 'RECRUITER'
+            ? '/recruiter/schedule'
+            : '/candidate/interviews';
         navigate(dashboardPath);
+    };
+
+    // "Just Leave" — host leaves without completing
+    const justLeaveCall = async () => {
+        setShowEndInterviewModal(false);
+        if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach((t) => t.stop());
+        }
+        if (screenStreamRef.current) {
+            screenStreamRef.current.getTracks().forEach((t) => t.stop());
+        }
+        peerConnectionsRef.current.forEach((pc) => pc.close());
+        peerConnectionsRef.current.clear();
+        if (socketRef.current) {
+            socketRef.current.disconnect();
+        }
+        const isFreelancer = user?.role === 'INTERVIEWER' || user?.role === 'freelancer';
+        const dashboardPath = isFreelancer
+            ? '/interviewer'
+            : '/recruiter/schedule';
+        navigate(dashboardPath);
+    };
+
+    // "Complete Interview" — host finalizes everything
+    const completeInterview = async () => {
+        if (!interview?._id) return;
+        setCompletingInterview(true);
+
+        try {
+            // Flush proctoring logs first
+            if (!isRecruiter) {
+                try { await flushLogs(); } catch (e) { /* ignore */ }
+            }
+
+            console.log('[InterviewRoom] 🚀 Completing interview via POST /complete...');
+            await apiRequest(`/interviews/${interview._id}/complete`, 'POST', {
+                interviewerRemarks: interviewerRemarks.trim(),
+            });
+
+            addToast('success', '✅ Interview completed! AI report is being generated.');
+
+            // Emit socket event to kick all participants
+            if (socketRef.current && interview.meetingId) {
+                socketRef.current.emit('end-interview', { meetingId: interview.meetingId });
+            }
+
+            // Give a moment for the socket event to propagate, then clean up
+            setTimeout(() => {
+                if (localStreamRef.current) {
+                    localStreamRef.current.getTracks().forEach((t) => t.stop());
+                }
+                if (screenStreamRef.current) {
+                    screenStreamRef.current.getTracks().forEach((t) => t.stop());
+                }
+                peerConnectionsRef.current.forEach((pc) => pc.close());
+                peerConnectionsRef.current.clear();
+                if (socketRef.current) {
+                    socketRef.current.disconnect();
+                }
+                const isFreelancer = user?.role === 'INTERVIEWER' || user?.role === 'freelancer';
+                const dashboardPath = isFreelancer
+                    ? '/interviewer'
+                    : '/recruiter/schedule';
+                navigate(dashboardPath);
+            }, 1500);
+        } catch (err: any) {
+            console.error('[InterviewRoom] ❌ Failed to complete interview:', err);
+            addToast('error', err.message || 'Failed to complete interview');
+        } finally {
+            setCompletingInterview(false);
+            setShowEndInterviewModal(false);
+        }
     };
 
     const kickParticipant = (targetSocketId: string) => {
@@ -867,11 +1001,20 @@ const InterviewRoom: React.FC = () => {
             setAdaptiveSession(sessionData);
             setLastEvaluation(null);
             
+            // **** Show coding panel and broadcast to room ****
+            setIsCodingTestVisible(true);
+            
             if (socketRef.current) {
                 socketRef.current.emit('adaptive-test-event', {
                     sessionData,
                     evaluation: null
                 });
+                // Notify all participants to show coding panel
+                if (interview.meetingId) {
+                    socketRef.current.emit('coding-test-started-event', {
+                        roomId: interview.meetingId,
+                    });
+                }
             }
             addToast('success', 'Adaptive test started');
         } catch (err: any) {
@@ -1226,9 +1369,9 @@ const InterviewRoom: React.FC = () => {
                 )}
             </header>
 
-            {/* Main Content — Split View */}
+            {/* Main Content — Dynamic Layout */}
             <div className="flex-1 flex overflow-hidden relative">
-                {/* Admission Requests Overlay (Recruiter Only) */}
+                {/* Admission Requests Overlay (Host Only) */}
                 {isRecruiter && admissionRequests.length > 0 && (
                     <div className="absolute top-4 right-4 z-50 flex flex-col gap-3">
                         {admissionRequests.map(req => (
@@ -1261,134 +1404,163 @@ const InterviewRoom: React.FC = () => {
                     </div>
                 )}
 
-
-
-                {/* Left Side: Code Editor */}
-                <div ref={editorContainerRef} className={`flex flex-col transition-all duration-300 ${isEditorFocused ? 'flex-[3]' : 'flex-[2]'}`}>
-                    {/* Editor Header */}
-                    <div className={`h-10 border-b flex items-center justify-between px-4 ${isDark ? 'bg-neutral-900 border-neutral-800' : 'bg-white border-purple-200'}`}>
-                        <div className="flex items-center gap-2">
-                            <Code size={14} className="text-[#7B2CBF]" />
-                            <span className={`text-xs font-medium ${isDark ? 'text-neutral-400' : 'text-[#6b46a0]'}`}>Coding Sandbox</span>
-                            
-                            {isRecruiter && (!adaptiveSession || adaptiveSession.status === 'completed') && (
-                                <button
-                                    onClick={startAdaptiveTest}
-                                    disabled={evaluating}
-                                    className="ml-4 bg-[#7B2CBF]/20 text-[#9D4EDD] hover:bg-[#7B2CBF]/40 border border-[#7B2CBF]/30 px-3 py-1 rounded text-xs font-semibold transition"
-                                >
-                                    {evaluating ? 'Starting...' : 'Start Adaptive Test'}
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <select
-                                value="python"
-                                disabled
-                                className={`border text-xs rounded px-2 py-1 opacity-80 cursor-not-allowed outline-none ${isDark ? 'bg-neutral-800 border-neutral-700 text-neutral-300' : 'bg-purple-50 border-purple-200 text-[#6b46a0]'}`}
-                            >
-                                <option value="python">Python</option>
-                            </select>
-                            <button
-                                onClick={() => setIsEditorFocused(!isEditorFocused)}
-                                className={`transition-colors p-1 ${isDark ? 'text-neutral-500 hover:text-white' : 'text-[#6b46a0] hover:text-[#1a0033]'}`}
-                                title={isEditorFocused ? 'Minimize editor' : 'Maximize editor'}
-                            >
-                                {isEditorFocused ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Adaptive Test Panel */}
-                    {adaptiveSession && adaptiveSession.status === 'in_progress' && (
-                        <div className="bg-neutral-800 border-b border-neutral-700 p-4 max-h-48 overflow-y-auto shrink-0 transition-all">
-                            <div className="flex justify-between items-start mb-2">
-                                <div>
-                                    <h3 className="font-bold text-white text-base">
-                                        Q{adaptiveSession.questionNumber}: {adaptiveSession.currentQuestion?.title}
-                                    </h3>
-                                    <div className="flex gap-2 text-[10px] mt-1.5">
-                                        <span className="px-1.5 py-0.5 rounded bg-[#7B2CBF]/20 text-[#9D4EDD] uppercase font-bold border border-[#7B2CBF]/30">
-                                            {adaptiveSession.difficulty.replace('_', ' ')}
-                                        </span>
-                                        <span className="px-1.5 py-0.5 rounded bg-neutral-700 text-neutral-300 border border-neutral-600">
-                                            {adaptiveSession.currentQuestion?.category}
-                                        </span>
-                                    </div>
-                                </div>
-                                {isRecruiter && (
+                {/* ========== CODING PANEL (only visible after host starts test) ========== */}
+                {isCodingTestVisible && (
+                    <div ref={editorContainerRef} className={`flex flex-col transition-all duration-500 ${isEditorFocused ? 'flex-[3]' : 'flex-[2]'}`} style={{ minWidth: 0 }}>
+                        {/* Editor Header */}
+                        <div className={`h-10 border-b flex items-center justify-between px-4 ${isDark ? 'bg-neutral-900 border-neutral-800' : 'bg-white border-purple-200'}`}>
+                            <div className="flex items-center gap-2">
+                                <Code size={14} className="text-[#7B2CBF]" />
+                                <span className={`text-xs font-medium ${isDark ? 'text-neutral-400' : 'text-[#6b46a0]'}`}>Coding Sandbox</span>
+                                
+                                {isRecruiter && (!adaptiveSession || adaptiveSession.status === 'completed') && (
                                     <button
-                                        onClick={submitAndNextAdaptiveTest}
+                                        onClick={startAdaptiveTest}
                                         disabled={evaluating}
-                                        className="bg-[#7B2CBF] hover:bg-[#9D4EDD] text-white px-3 py-1.5 rounded text-xs font-semibold transition-colors disabled:opacity-50 shadow-md whitespace-nowrap"
+                                        className="ml-4 bg-[#7B2CBF]/20 text-[#9D4EDD] hover:bg-[#7B2CBF]/40 border border-[#7B2CBF]/30 px-3 py-1 rounded text-xs font-semibold transition"
                                     >
-                                        {evaluating ? 'Evaluating...' : 'Submit & Next Question'}
+                                        {evaluating ? 'Starting...' : adaptiveSession ? 'Restart Test' : 'Start Adaptive Test'}
                                     </button>
                                 )}
                             </div>
-                            <p className="text-xs text-neutral-300 mt-2 whitespace-pre-wrap leading-relaxed">
-                                {adaptiveSession.currentQuestion?.description}
-                            </p>
-                            
-                            {lastEvaluation && (!lastEvaluation.passed) && (
-                                <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded p-2 text-xs text-red-200">
-                                    <strong className="text-red-400">Previous Result:</strong> Failed ({lastEvaluation.score}%). Next time, be sure to check logic and edge cases.
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value="python"
+                                    disabled
+                                    className={`border text-xs rounded px-2 py-1 opacity-80 cursor-not-allowed outline-none ${isDark ? 'bg-neutral-800 border-neutral-700 text-neutral-300' : 'bg-purple-50 border-purple-200 text-[#6b46a0]'}`}
+                                >
+                                    <option value="python">Python</option>
+                                </select>
+                                <button
+                                    onClick={() => setIsEditorFocused(!isEditorFocused)}
+                                    className={`transition-colors p-1 ${isDark ? 'text-neutral-500 hover:text-white' : 'text-[#6b46a0] hover:text-[#1a0033]'}`}
+                                    title={isEditorFocused ? 'Minimize editor' : 'Maximize editor'}
+                                >
+                                    {isEditorFocused ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Adaptive Test Panel */}
+                        {adaptiveSession && adaptiveSession.status === 'in_progress' && (
+                            <div className="bg-neutral-800 border-b border-neutral-700 p-4 max-h-48 overflow-y-auto shrink-0 transition-all">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div>
+                                        <h3 className="font-bold text-white text-base">
+                                            Q{adaptiveSession.questionNumber}: {adaptiveSession.currentQuestion?.title}
+                                        </h3>
+                                        <div className="flex gap-2 text-[10px] mt-1.5">
+                                            <span className="px-1.5 py-0.5 rounded bg-[#7B2CBF]/20 text-[#9D4EDD] uppercase font-bold border border-[#7B2CBF]/30">
+                                                {adaptiveSession.difficulty.replace('_', ' ')}
+                                            </span>
+                                            <span className="px-1.5 py-0.5 rounded bg-neutral-700 text-neutral-300 border border-neutral-600">
+                                                {adaptiveSession.currentQuestion?.category}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    {isRecruiter && (
+                                        <button
+                                            onClick={submitAndNextAdaptiveTest}
+                                            disabled={evaluating}
+                                            className="bg-[#7B2CBF] hover:bg-[#9D4EDD] text-white px-3 py-1.5 rounded text-xs font-semibold transition-colors disabled:opacity-50 shadow-md whitespace-nowrap"
+                                        >
+                                            {evaluating ? 'Evaluating...' : 'Submit & Next Question'}
+                                        </button>
+                                    )}
                                 </div>
-                            )}
-                            {lastEvaluation && lastEvaluation.passed && (
-                                <div className="mt-3 bg-green-500/10 border border-green-500/20 rounded p-2 text-xs text-green-200">
-                                    <strong className="text-green-400">Previous Result:</strong> Passed 100%!
-                                </div>
-                            )}
+                                <p className="text-xs text-neutral-300 mt-2 whitespace-pre-wrap leading-relaxed">
+                                    {adaptiveSession.currentQuestion?.description}
+                                </p>
+                                
+                                {lastEvaluation && (!lastEvaluation.passed) && (
+                                    <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded p-2 text-xs text-red-200">
+                                        <strong className="text-red-400">Previous Result:</strong> Failed ({lastEvaluation.score}%). Next time, be sure to check logic and edge cases.
+                                    </div>
+                                )}
+                                {lastEvaluation && lastEvaluation.passed && (
+                                    <div className="mt-3 bg-green-500/10 border border-green-500/20 rounded p-2 text-xs text-green-200">
+                                        <strong className="text-green-400">Previous Result:</strong> Passed 100%!
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        
+                        {adaptiveSession && adaptiveSession.status === 'completed' && (
+                             <div className="bg-[#7B2CBF]/10 border-b border-[#7B2CBF]/30 p-4 shrink-0 flex items-center justify-between">
+                                 <div>
+                                    <h3 className="font-bold text-white text-base flex items-center gap-2">
+                                        <CheckCircle size={16} className="text-emerald-400" />
+                                        Test Completed
+                                    </h3>
+                                    <p className="text-xs text-neutral-400 mt-1">
+                                        The candidate has finished the adaptive coding test.
+                                    </p>
+                                 </div>
+                                 <div className="text-right">
+                                    <span className="block text-xl font-black text-emerald-400">{adaptiveSession.finalScore}%</span>
+                                    <span className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold">Final Score</span>
+                                 </div>
+                             </div>
+                        )}
+
+                        {/* Monaco Editor */}
+                        <div className="flex-1 relative">
+                            <Editor
+                                height="100%"
+                                language={editorLanguage}
+                                theme={isDark ? 'vs-dark' : 'light'}
+                                value={code}
+                                onChange={handleCodeChange}
+                                options={{
+                                    fontSize: 14,
+                                    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+                                    minimap: { enabled: false },
+                                    scrollBeyondLastLine: false,
+                                    automaticLayout: true,
+                                    padding: { top: 16 },
+                                    lineNumbers: 'on',
+                                    renderWhitespace: 'selection',
+                                    bracketPairColorization: { enabled: true },
+                                    cursorBlinking: 'smooth',
+                                    smoothScrolling: true,
+                                    wordWrap: 'on',
+                                }}
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {/* ========== VIDEO AREA ========== */}
+                {/* When coding is hidden → full area. When coding visible → compact sidebar. */}
+                <div className={`${
+                    isCodingTestVisible
+                        ? 'w-[320px] min-w-[280px] max-w-[380px] border-l'
+                        : 'flex-1'
+                } overflow-hidden relative transition-all duration-500 ${isDark ? 'bg-neutral-900 border-neutral-800' : 'bg-[#EDE4FF] border-purple-200'}`}>
+                    
+                    {/* "Start Coding Test" Button — Host only, shown in full video view */}
+                    {!isCodingTestVisible && isRecruiter && (
+                        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30">
+                            <button
+                                onClick={() => {
+                                    setIsCodingTestVisible(true);
+                                    // Broadcast to room
+                                    if (socketRef.current && interview?.meetingId) {
+                                        socketRef.current.emit('coding-test-started-event', {
+                                            roomId: interview.meetingId,
+                                        });
+                                    }
+                                    addToast('info', '📝 Coding panel opened. Use "Start Adaptive Test" to begin the assessment.');
+                                }}
+                                className="flex items-center gap-2.5 px-5 py-2.5 bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] text-white rounded-full shadow-xl shadow-purple-500/30 hover:shadow-purple-500/50 hover:scale-105 transition-all duration-300 text-sm font-semibold border border-purple-400/20"
+                            >
+                                <PlayCircle size={18} />
+                                <span>Start Coding Test</span>
+                            </button>
                         </div>
                     )}
-                    
-                    {adaptiveSession && adaptiveSession.status === 'completed' && (
-                         <div className="bg-[#7B2CBF]/10 border-b border-[#7B2CBF]/30 p-4 shrink-0 flex items-center justify-between">
-                             <div>
-                                <h3 className="font-bold text-white text-base flex items-center gap-2">
-                                    Test Completed
-                                </h3>
-                                <p className="text-xs text-neutral-400 mt-1">
-                                    The candidate has finished the adaptive coding test.
-                                </p>
-                             </div>
-                             <div className="text-right">
-                                <span className="block text-xl font-black text-emerald-400">{adaptiveSession.finalScore}%</span>
-                                <span className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold">Final Score</span>
-                             </div>
-                         </div>
-                    )}
 
-                    {/* Monaco Editor */}
-                    <div className="flex-1 relative">
-                        <Editor
-                            height="100%"
-                            language={editorLanguage}
-                            theme={isDark ? 'vs-dark' : 'light'}
-                            value={code}
-                            onChange={handleCodeChange}
-                            options={{
-                                fontSize: 14,
-                                fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-                                minimap: { enabled: false },
-                                scrollBeyondLastLine: false,
-                                automaticLayout: true,
-                                padding: { top: 16 },
-                                lineNumbers: 'on',
-                                renderWhitespace: 'selection',
-                                bracketPairColorization: { enabled: true },
-                                cursorBlinking: 'smooth',
-                                smoothScrolling: true,
-                                wordWrap: 'on',
-                            }}
-                        />
-                    </div>
-                </div>
-
-                {/* Right Side: Dynamic CSS Grid Video Feeds */}
-                <div className={`flex-1 min-w-[300px] max-w-[520px] border-l overflow-hidden relative ${isDark ? 'bg-neutral-900 border-neutral-800' : 'bg-[#EDE4FF] border-purple-200'}`}>
-                    <div className="video-grid" style={{ height: '100%' }}>
+                    <div className={`video-grid ${isCodingTestVisible ? 'sidebar-mode' : ''}`} style={{ height: '100%' }}>
 
                         {/* Local Video Tile */}
                         <div className="video-tile">
@@ -1421,7 +1593,7 @@ const InterviewRoom: React.FC = () => {
                                 />
                                 <span className="video-label">{rs.userName}</span>
 
-                                {/* Kick button — Recruiter only, appears on hover */}
+                                {/* Kick button — Host only, appears on hover */}
                                 {isRecruiter && (
                                     <button
                                         className="kick-btn"
@@ -1447,6 +1619,93 @@ const InterviewRoom: React.FC = () => {
                     </div>
                 </div>
             </div>
+
+            {/* ========== END INTERVIEW MODAL ========== */}
+            {showEndInterviewModal && (
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
+                    <div className="bg-neutral-900 border border-neutral-700 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-in zoom-in-95" style={{ animationDuration: '0.2s' }}>
+                        {/* Header */}
+                        <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#7B2CBF] to-[#480CA8] flex items-center justify-center shadow-lg shadow-purple-500/20">
+                                    <ClipboardCheck size={20} className="text-white" />
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-bold text-white">End Interview Session</h2>
+                                    <p className="text-xs text-neutral-500">Choose how to exit this interview</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowEndInterviewModal(false)}
+                                className="w-8 h-8 rounded-lg bg-neutral-800 hover:bg-neutral-700 flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="px-6 py-5 space-y-5">
+                            {/* Final Remarks */}
+                            <div>
+                                <label className="block text-sm font-semibold text-neutral-300 mb-2">
+                                    Final Remarks / Candidate Evaluation
+                                </label>
+                                <p className="text-xs text-neutral-500 mb-2">
+                                    Your qualitative feedback will be included in the AI-powered interview report.
+                                </p>
+                                <textarea
+                                    value={interviewerRemarks}
+                                    onChange={(e) => setInterviewerRemarks(e.target.value)}
+                                    rows={4}
+                                    placeholder="e.g. Candidate showed strong analytical skills but struggled with system design concepts. Communication was clear and professional..."
+                                    className="w-full bg-black/50 border border-neutral-700 rounded-xl py-3 px-4 text-white text-sm placeholder-neutral-600 focus:border-[#7B2CBF] focus:ring-1 focus:ring-[#7B2CBF] transition-all outline-none resize-none leading-relaxed"
+                                />
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex flex-col gap-3">
+                                {/* Complete Interview */}
+                                <button
+                                    onClick={completeInterview}
+                                    disabled={completingInterview}
+                                    className="w-full flex items-center justify-center gap-2.5 py-3.5 px-4 bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] text-white rounded-xl font-semibold text-sm hover:from-[#9D4EDD] hover:to-[#6B21A8] transition-all duration-200 shadow-lg shadow-purple-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {completingInterview ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            Completing & Generating AI Report...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <CheckCircle size={18} />
+                                            Complete Interview & Generate AI Report
+                                        </>
+                                    )}
+                                </button>
+
+                                <div className="flex items-center gap-3">
+                                    <div className="flex-1 h-px bg-neutral-800" />
+                                    <span className="text-[10px] text-neutral-600 uppercase tracking-widest font-semibold">or</span>
+                                    <div className="flex-1 h-px bg-neutral-800" />
+                                </div>
+
+                                {/* Just Leave */}
+                                <button
+                                    onClick={justLeaveCall}
+                                    className="w-full flex items-center justify-center gap-2 py-3 px-4 border border-neutral-700 bg-neutral-800/50 text-neutral-300 rounded-xl font-medium text-sm hover:bg-neutral-800 hover:text-white transition-all duration-200"
+                                >
+                                    <PhoneOff size={16} />
+                                    Just Leave (Don't Complete)
+                                </button>
+                            </div>
+
+                            <p className="text-[10px] text-neutral-600 text-center">
+                                "Complete Interview" will end the session for all participants, finalize any active coding test, and trigger the AI evaluation report.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Bottom Control Bar - Floating Pill */}
             <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center justify-center gap-3 px-6 py-3 border rounded-full backdrop-blur-xl ${isDark ? 'bg-neutral-900/95 border-neutral-700/60 shadow-[0_8px_32px_rgba(0,0,0,0.6)]' : 'bg-white/95 border-purple-200 shadow-[0_8px_32px_rgba(123,44,191,0.15)]'}`}>
@@ -1499,13 +1758,13 @@ const InterviewRoom: React.FC = () => {
                 <button
                     onClick={endCall}
                     className="h-11 px-6 rounded-full bg-red-500 text-white hover:bg-red-600 flex items-center justify-center gap-2 transition-all duration-200 shadow-lg shadow-red-500/20 active:scale-95 text-sm font-semibold"
-                    title="End Call & Leave"
+                    title={isRecruiter ? 'End / Complete Interview' : 'Leave Call'}
                 >
                     <PhoneOff size={18} />
-                    <span>End Call</span>
+                    <span>{isRecruiter ? 'End Interview' : 'Leave Call'}</span>
                 </button>
 
-                {/* Divider — only shown when recruiter controls appear */}
+                {/* Recruiter Controls */}
                 {isRecruiter && remoteStreams.length > 0 && (
                     <>
                         <div className={`w-px h-8 mx-2 ${isDark ? 'bg-neutral-700' : 'bg-purple-200'}`} />

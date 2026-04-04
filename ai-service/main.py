@@ -376,6 +376,149 @@ async def parse_cv(
 
 
 # ---------------------------------------------------------------------------
+# Interview Evaluation — Request / Response Schemas
+# ---------------------------------------------------------------------------
+class ProctoringEvent(BaseModel):
+    type: str
+    detail: str
+    timestamp: str = ""
+
+
+class InterviewEvalRequest(BaseModel):
+    interviewId: str
+    candidateCode: str = ""
+    codingScore: int = 0
+    codingTestConducted: bool = True
+    proctorEvents: List[ProctoringEvent] = []
+    interviewerNotes: str = ""
+
+
+class InterviewEvalResponse(BaseModel):
+    suitabilityScore: int
+    strengths: List[str]
+    weaknesses: List[str]
+    redFlags: List[str]
+
+
+# ---------------------------------------------------------------------------
+# Interview Evaluation Endpoint (Phase 1 — Mocked)
+# ---------------------------------------------------------------------------
+@app.post("/api/ai/evaluate-interview", response_model=InterviewEvalResponse)
+async def evaluate_interview(payload: InterviewEvalRequest):
+    """
+    AI-Powered Post-Interview Evaluation (MOCKED).
+
+    Accepts interview data (code, proctoring events, interviewer notes)
+    and returns a structured evaluation with:
+      - suitabilityScore (0-100)
+      - strengths
+      - weaknesses
+      - redFlags (based strictly on proctoring events)
+
+    In production, this would call a real LLM. For now, returns a
+    realistic mocked response with dynamic red-flag generation.
+    """
+    logger.info("=" * 60)
+    logger.info("[AI-Eval] 📥 Received evaluation request")
+    logger.info("[AI-Eval]   Interview ID   : %s", payload.interviewId)
+    logger.info("[AI-Eval]   Code length    : %d chars", len(payload.candidateCode))
+    logger.info("[AI-Eval]   Coding score   : %d", payload.codingScore)
+    logger.info("[AI-Eval]   Coding test run: %s", payload.codingTestConducted)
+    logger.info("[AI-Eval]   Proctor events : %d", len(payload.proctorEvents))
+    logger.info("[AI-Eval]   Notes length   : %d chars", len(payload.interviewerNotes))
+
+    # ── Dynamic Red Flags from Proctoring Events ─────────────────────────
+    red_flags: list[str] = []
+    event_counts: dict[str, int] = {}
+    for evt in payload.proctorEvents:
+        event_counts[evt.type] = event_counts.get(evt.type, 0) + 1
+
+    logger.info("[AI-Eval]   Event breakdown: %s", event_counts)
+
+    if event_counts.get("tab_switch", 0) > 0:
+        count = event_counts["tab_switch"]
+        red_flags.append(
+            f"Candidate switched browser tabs {count} time(s) during the interview — "
+            f"potential use of external resources."
+        )
+    if event_counts.get("copy", 0) > 0 or event_counts.get("paste", 0) > 0:
+        c = event_counts.get("copy", 0)
+        p = event_counts.get("paste", 0)
+        red_flags.append(
+            f"Clipboard activity detected: {c} copy and {p} paste event(s) — "
+            f"may indicate code was sourced externally."
+        )
+    if event_counts.get("face_lost", 0) > 0:
+        count = event_counts["face_lost"]
+        red_flags.append(
+            f"Candidate's face was not detected {count} time(s) — "
+            f"possible presence of unauthorized assistance."
+        )
+    if event_counts.get("gaze", 0) > 0:
+        count = event_counts["gaze"]
+        red_flags.append(
+            f"Suspicious gaze deviation detected {count} time(s) — "
+            f"candidate may have been reading from another screen."
+        )
+
+    logger.info("[AI-Eval]   Generated %d red flag(s)", len(red_flags))
+
+    # ── Mock Strengths & Weaknesses ──────────────────────────────────────
+    strengths = [
+        "Demonstrated strong problem-solving approach with clear logical thinking",
+        "Code structure was clean and well-organized with meaningful variable names",
+        "Good understanding of core data structures and their trade-offs",
+        "Communicated thought process effectively while coding",
+    ]
+
+    weaknesses = [
+        "Could improve time complexity analysis — did not discuss Big-O",
+        "Limited error handling and input validation in submitted code",
+        "Did not consider edge cases (empty inputs, negative values)",
+        "Would benefit from writing unit tests alongside solutions",
+    ]
+
+    # ── Mock Suitability Score ───────────────────────────────────────────
+    # Base score of 72 (realistic mid-high), adjusted by red flags and
+    # coding performance. If no coding test was conducted, score is based
+    # solely on behavioral signals (notes + proctoring).
+    base_score = 72
+
+    if payload.codingTestConducted:
+        # Blend coding score into the evaluation
+        coding_influence = (payload.codingScore - 50) * 0.3  # ±15 range
+        base_score = int(base_score + coding_influence)
+        logger.info(
+            "[AI-Eval]   Coding influence: %+.1f → adjusted base: %d",
+            coding_influence, base_score
+        )
+    else:
+        logger.info(
+            "[AI-Eval]   No coding test conducted — score based on behavioral assessment only"
+        )
+        # Remove coding-related weakness
+        weaknesses = [w for w in weaknesses if "time complexity" not in w.lower()]
+        strengths.append(
+            "Interview was conducted as a behavioral/conversational assessment"
+        )
+
+    # Penalize for red flags
+    flag_penalty = len(red_flags) * 5
+    final_score = max(0, min(100, base_score - flag_penalty))
+
+    logger.info("[AI-Eval]   Red flag penalty: -%d", flag_penalty)
+    logger.info("[AI-Eval] 📤 Final suitability score: %d", final_score)
+    logger.info("=" * 60)
+
+    return InterviewEvalResponse(
+        suitabilityScore=final_score,
+        strengths=strengths,
+        weaknesses=weaknesses,
+        redFlags=red_flags,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Health Check
 # ---------------------------------------------------------------------------
 @app.get("/health")
