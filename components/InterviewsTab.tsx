@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Calendar, Clock, Video, Plus, User, Briefcase,
-    ExternalLink, Search, X
+    ExternalLink, Search, X, Award
 } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { Card, Button, Badge, Modal, Input } from './UI';
 import { useToast } from './Toast';
+import AIReportCard from './AIReportCard';
 
 interface InterviewData {
     _id: string;
@@ -18,6 +19,16 @@ interface InterviewData {
     candidateId: { _id: string; name: string; email: string; profilePicture?: string };
     recruiterId: { _id: string; name: string; email: string; profilePicture?: string };
     jobId?: { _id: string; title: string; company: string };
+    interviewerRemarks?: string;
+    codingTestConducted?: boolean;
+    aiEvaluation?: {
+        suitabilityScore: number;
+        strengths: string[];
+        weaknesses: string[];
+        redFlags: string[];
+        codingScore: number;
+        evaluatedAt: string;
+    };
 }
 
 interface CandidateOption {
@@ -51,6 +62,9 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
     const [loading, setLoading] = useState(true);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [showHistoryModal, setShowHistoryModal] = useState(false);
+
+    // AI Report modal state
+    const [selectedReport, setSelectedReport] = useState<InterviewData | null>(null);
 
     // Schedule form state (Recruiter only)
     const [candidates, setCandidates] = useState<CandidateOption[]>([]);
@@ -401,14 +415,59 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                                         </div>
                                     </div>
                                 </div>
-                                <Badge variant={statusBadgeVariant[interview.status] || 'neutral'} className="shrink-0 ml-4">
-                                    {interview.status}
-                                </Badge>
+                                <div className="flex items-center gap-2 shrink-0 ml-4">
+                                    {/* AI Report Button — only for completed interviews with evaluation */}
+                                    {interview.status === 'Completed' && interview.aiEvaluation && (
+                                        <button
+                                            onClick={() => setSelectedReport(interview)}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#7B2CBF]/10 border border-[#7B2CBF]/30 hover:bg-[#7B2CBF]/20 rounded-lg transition-colors text-xs font-semibold text-[#9D4EDD]"
+                                        >
+                                            <Award size={13} />
+                                            AI Report
+                                        </button>
+                                    )}
+                                    <Badge variant={statusBadgeVariant[interview.status] || 'neutral'}>
+                                        {interview.status}
+                                    </Badge>
+                                </div>
                             </div>
                         </Card>
                     ))}
                 </div>
             </Modal>
+
+            {/* AI Report Detail Modal */}
+            {selectedReport && selectedReport.aiEvaluation && (
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
+                    <div className="bg-neutral-900 border border-neutral-700 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] overflow-y-auto">
+                        {/* Header */}
+                        <div className="sticky top-0 bg-neutral-900/95 backdrop-blur-md px-6 py-4 border-b border-neutral-800 flex items-center justify-between z-10">
+                            <h2 className="text-lg font-bold text-white">AI Interview Report</h2>
+                            <button
+                                onClick={() => setSelectedReport(null)}
+                                className="w-8 h-8 rounded-lg bg-neutral-800 hover:bg-neutral-700 flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        {/* Report Content */}
+                        <div className="px-6 py-5">
+                            <AIReportCard
+                                evaluation={selectedReport.aiEvaluation}
+                                candidateName={
+                                    role === 'RECRUITER'
+                                        ? selectedReport.candidateId?.name
+                                        : selectedReport.recruiterId?.name
+                                }
+                                jobTitle={selectedReport.jobId?.title}
+                                interviewerRemarks={selectedReport.interviewerRemarks}
+                                codingTestConducted={selectedReport.codingTestConducted}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Schedule Interview Modal (Recruiter only) */}
             <Modal

@@ -94,10 +94,29 @@ export interface Interview {
     detail: string;
     timestamp: string;
   }>;
+  feedback?: {
+    technicalScore: number;
+    communicationScore: number;
+    detailedFeedback: string;
+    recommendation: 'Strong Hire' | 'Hire' | 'No Hire';
+  };
+  // AI Post-Interview Evaluation
+  codingTestSessionId?: string;
+  codingTestConducted?: boolean;
+  interviewerRemarks?: string;
+  aiEvaluation?: {
+    suitabilityScore: number;
+    strengths: string[];
+    weaknesses: string[];
+    redFlags: string[];
+    codingScore: number;
+    evaluatedAt: string;
+  };
   // Legacy compat
   date?: string;
   time?: string;
   meetingLink?: string;
+  createdAt?: string;
 }
 
 export interface Message {
