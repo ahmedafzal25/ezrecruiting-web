@@ -36,7 +36,9 @@ const jobSchema = new mongoose.Schema({
         ref: 'User',
         default: null
     },
+    freelancerFinalReport: { type: String, default: '' },
+    aiEvaluationSummary: { type: mongoose.Schema.Types.Mixed, default: {} },
     createdAt: { type: Date, default: Date.now }
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('Job', jobSchema);

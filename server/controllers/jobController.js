@@ -218,7 +218,7 @@ exports.getMyReceivedApplications = async (req, res) => {
         const isFreelancer = req.user.role === 'freelancer' || req.user.role === 'INTERVIEWER';
         const jobQuery = isFreelancer 
             ? { delegatedFreelancerId: req.user.id, delegationStatus: 'accepted' }
-            : { postedBy: req.user.id };
+            : { postedBy: req.user.id, status: 'Active' }; // Recruiters only see active (non-closed) jobs
 
         const jobs = await Job.find(jobQuery).select('_id');
         const jobIds = jobs.map(job => job._id);
@@ -232,7 +232,46 @@ exports.getMyReceivedApplications = async (req, res) => {
                 populate: { path: 'profile' } // Get full profile data (experience, etc.) from here
             })
             .populate('job', 'title')
-            .sort({ appliedAt: -1 });
+            .sort({ appliedAt: -1 })
+            .lean();
+
+        // Attach external AI test and interview results so the Freelancer can package them
+        const Interview = require('../models/Interview');
+        const TestSession = require('../models/TestSession');
+
+        for (let app of applications) {
+            if (!app.candidate) continue;
+
+            const interview = await Interview.findOne({
+                jobId: app.job._id,
+                candidateId: app.candidate._id,
+                status: 'Completed'
+            }).sort({ createdAt: -1 }).lean();
+
+            if (interview) {
+                app.aiInterviewReport = interview.aiEvaluation || null;
+                app.aiAnalysis = interview.feedback ? interview.feedback.detailedFeedback : null;
+            }
+
+            const testSession = await TestSession.findOne({
+                jobId: app.job._id,
+                candidateId: app.candidate._id,
+                status: 'completed'
+            }).populate('responses.questionId', 'title category').sort({ completedAt: -1 }).lean();
+
+            if (testSession) {
+                app.codingTestResults = {
+                    finalScore: testSession.finalScore,
+                    difficultyReached: testSession.currentDifficulty,
+                    responses: testSession.responses.map(r => ({
+                        question: r.questionId?.title || 'Unknown',
+                        category: r.questionId?.category || 'Unknown',
+                        passed: r.passed,
+                        score: r.score
+                    }))
+                };
+            }
+        }
 
         res.json(applications);
     } catch (err) {
@@ -296,6 +335,140 @@ exports.delegateJobToFreelancer = async (req, res) => {
         res.json({ message: 'Job delegated successfully', job: updatedJob });
     } catch (err) {
         console.error('delegateJobToFreelancer error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// @desc    Get all delegated jobs in 'reviewing' state for the recruiter
+// @route   GET /api/jobs/delegations/reviewing
+// @access  Private (Recruiter)
+exports.getReviewingDelegations = async (req, res) => {
+    try {
+        const jobs = await Job.find({
+            postedBy: req.user.id,
+            delegationStatus: 'reviewing'
+        })
+            .populate('delegatedFreelancerId', 'name email profilePicture')
+            .populate({
+                path: 'proposedCandidateId',
+                select: 'name email profilePicture resumeUrl',
+                populate: { path: 'profile' }
+            })
+            .sort({ createdAt: -1 })
+            .lean();
+
+        res.json(jobs);
+    } catch (err) {
+        console.error('getReviewingDelegations error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// @desc    Approve a proposed hire from a delegated freelancer
+// @route   PUT /api/jobs/delegations/:jobId/approve
+// @access  Private (Recruiter — must own the job)
+exports.approveDelegatedHire = async (req, res) => {
+    try {
+        const job = await Job.findById(req.params.jobId);
+        if (!job) {
+            return res.status(404).json({ message: 'Job not found' });
+        }
+
+        if (job.postedBy.toString() !== req.user.id) {
+            return res.status(403).json({ message: 'Not authorized — you do not own this job' });
+        }
+
+        if (job.delegationStatus !== 'reviewing') {
+            return res.status(400).json({ message: `Cannot approve — delegation status is '${job.delegationStatus}'` });
+        }
+
+        // Mark as completed
+        job.delegationStatus = 'completed';
+        job.status = 'Closed';
+        await job.save();
+
+        // Update the Application status to 'Hired' for the proposed candidate
+        const applicationModel = require('../models/Application');
+        if (job.proposedCandidateId) {
+            await applicationModel.findOneAndUpdate(
+                { job: job._id, candidate: job.proposedCandidateId },
+                { status: 'Hired' }
+            );
+            // Reject all OTHER applicants for this job (bulk update)
+            await applicationModel.updateMany(
+                { job: job._id, candidate: { $ne: job.proposedCandidateId }, status: { $ne: 'Hired' } },
+                { status: 'Rejected' }
+            );
+        }
+
+        // Notify the freelancer
+        const Message = require('../models/Message');
+        if (job.delegatedFreelancerId) {
+            await Message.create({
+                senderId: req.user._id,
+                receiverId: job.delegatedFreelancerId,
+                content: `Great news! The recruiter approved your proposed candidate for the "${job.title}" role. The project is now complete.`
+            });
+        }
+
+        res.json({ message: 'Hire approved successfully. Job closed.', job });
+    } catch (err) {
+        console.error('approveDelegatedHire error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// @desc    Get all hired candidates from the recruiter's closed jobs
+// @route   GET /api/jobs/hirings/new
+// @access  Private (Recruiter)
+exports.getNewHirings = async (req, res) => {
+    try {
+        // Find closed jobs posted by this recruiter that have a hired candidate
+        const closedJobs = await Job.find({
+            postedBy: req.user.id,
+            status: 'Closed',
+            proposedCandidateId: { $ne: null }
+        })
+            .populate('proposedCandidateId', 'name email profilePicture headline profile')
+            .populate('delegatedFreelancerId', 'name email profilePicture')
+            .sort({ updatedAt: -1 })
+            .lean();
+
+        // Shape the data into a clean hiring record
+        const hirings = closedJobs.map(job => ({
+            jobId: job._id,
+            jobTitle: job.title,
+            company: job.company,
+            closedAt: job.updatedAt || job.createdAt,
+            candidate: job.proposedCandidateId,
+            recommendedBy: job.delegatedFreelancerId,
+            freelancerReport: job.freelancerFinalReport || '',
+            aiSummary: job.aiEvaluationSummary || {},
+        }));
+
+        res.json(hirings);
+    } catch (err) {
+        console.error('getNewHirings error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// @desc    Get all closed/past jobs for the recruiter
+// @route   GET /api/jobs/past-jobs
+// @access  Private (Recruiter)
+exports.getPastJobs = async (req, res) => {
+    try {
+        const jobs = await Job.find({
+            postedBy: req.user.id,
+            status: 'Closed'
+        })
+            .populate('proposedCandidateId', 'name email profilePicture')
+            .sort({ updatedAt: -1 })
+            .lean();
+
+        res.json(jobs);
+    } catch (err) {
+        console.error('getPastJobs error:', err);
         res.status(500).json({ message: 'Server error' });
     }
 };

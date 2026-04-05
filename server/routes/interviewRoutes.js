@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const Interview = require('../models/Interview');
 const TestSession = require('../models/TestSession');
 const Message = require('../models/Message');
+const Job = require('../models/Job');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const { getEligibleCandidates } = require('../controllers/interviewController');
 
@@ -16,8 +17,8 @@ const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 // Interview Routes
 // ============================
 
-// Schedule an Interview (Recruiter only)
-router.post('/schedule', protect, authorize('RECRUITER'), async (req, res) => {
+// Schedule an Interview
+router.post('/schedule', protect, authorize('RECRUITER', 'INTERVIEWER', 'freelancer'), async (req, res) => {
     try {
         const { candidateId, recruiterId, interviewerId, jobId, scheduledTime, notes, isDirectBooking } = req.body;
 
@@ -26,12 +27,38 @@ router.post('/schedule', protect, authorize('RECRUITER'), async (req, res) => {
             return res.status(400).json({ message: 'Interview cannot be scheduled in the past' });
         }
 
+        let targetRecruiterId = req.user._id;
+
+        if (jobId) {
+            const job = await Job.findById(jobId);
+            if (!job) {
+                return res.status(404).json({ message: 'Job not found' });
+            }
+
+            const isOwner = job.postedBy && job.postedBy.toString() === req.user._id.toString();
+            const isDelegated = job.delegatedFreelancerId && job.delegatedFreelancerId.toString() === req.user._id.toString();
+
+            if (!isOwner && !isDelegated && req.user.role !== 'ADMIN') {
+                return res.status(403).json({ message: 'Not authorized to schedule for this job' });
+            }
+
+            targetRecruiterId = job.postedBy;
+        } else if (req.user.role === 'freelancer' || req.user.role === 'INTERVIEWER') {
+            return res.status(400).json({ message: 'Job ID is required for delegated scheduling' });
+        }
+
+        if (!candidateId && !isDirectBooking) {
+            return res.status(400).json({ message: 'candidateId is required' });
+        }
+
+        const isFreelancer = req.user.role === 'freelancer' || req.user.role === 'INTERVIEWER';
+
         // If it's a direct booking by recruiter to interviewer
         const interviewData = {
-            recruiterId: req.user._id,
-            candidateId: candidateId || req.user._id, // Fallback if not specified
+            recruiterId: targetRecruiterId,
+            candidateId: candidateId, // Strict explicitly required
             jobId: jobId || undefined,
-            interviewerId: interviewerId || undefined,
+            interviewerId: isFreelancer ? req.user._id : (interviewerId || undefined),
             scheduledTime: new Date(scheduledTime),
             notes: notes || '',
         };
@@ -91,10 +118,26 @@ router.get('/my-interviews', protect, async (req, res) => {
             .populate('candidateId', 'name firstName lastName email profilePicture')
             .populate('recruiterId', 'name firstName lastName email profilePicture companyName')
             .populate('interviewerId', 'name firstName lastName email profilePicture')
-            .populate('jobId', 'title company')
+            .populate('jobId', 'title company status delegationStatus')
             .sort({ scheduledTime: -1 });
 
-        res.json(interviews);
+        const now = new Date();
+        const activeInterviews = [];
+        const pastInterviews = [];
+
+        interviews.forEach((interview) => {
+            const isPastTime = new Date(interview.scheduledTime) < now;
+            const isJobClosed = interview.jobId?.status === 'Closed' || interview.jobId?.delegationStatus === 'completed';
+            const isStatusTerminal = ['Completed', 'Cancelled'].includes(interview.status);
+
+            if (isPastTime || isJobClosed || isStatusTerminal) {
+                pastInterviews.push(interview);
+            } else {
+                activeInterviews.push(interview);
+            }
+        });
+
+        res.json({ activeInterviews, pastInterviews });
     } catch (err) {
         console.error('Fetch interviews error:', err);
         res.status(500).json({ message: 'Failed to fetch interviews' });

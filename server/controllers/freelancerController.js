@@ -441,9 +441,31 @@ exports.proposeHire = async (req, res) => {
       return res.status(400).json({ message: `Cannot propose hire — delegation status is '${job.delegationStatus}'` });
     }
 
+    const { finalNotes, aiReportData } = req.body;
+
+    // 1. Find the latest completed interview for this specific job and candidate
+    const completedInterview = await Interview.findOne({
+      jobId: jobId,
+      candidateId: candidateId,
+      status: 'Completed'
+    }).sort({ createdAt: -1 }).lean();
+
+    // 2. Extract the report from the DB model
+    const exactAiReport = completedInterview ? completedInterview.aiEvaluation : null;
+
     // Update the Job document
     job.proposedCandidateId = candidateId;
     job.delegationStatus = 'reviewing';
+    job.freelancerFinalReport = finalNotes || '';
+    
+    // 3. Save it securely to the Job handoff package
+    // Merge the exact DB report with the incoming UI wrapper to keep codingTestResults etc.
+    job.aiEvaluationSummary = {
+        ...(aiReportData || {}),
+        aiEvaluation: exactAiReport || (aiReportData && aiReportData.aiEvaluation) || {}
+    };
+    job.markModified('aiEvaluationSummary');
+    
     await job.save();
 
     // Update the Application document

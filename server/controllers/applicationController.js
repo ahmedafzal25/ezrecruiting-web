@@ -256,7 +256,10 @@ exports.getRankedCandidates = async (req, res) => {
             return res.status(404).json({ message: 'Job not found' });
         }
 
-        if (job.postedBy.toString() !== req.user.id) {
+        const isOwner = job.postedBy.toString() === (req.user.id || req.user._id);
+        const isDelegated = job.delegatedFreelancerId && job.delegatedFreelancerId.toString() === (req.user.id || req.user._id);
+
+        if (!isOwner && !isDelegated) {
             return res.status(403).json({ message: 'Not authorized to view candidates for this job' });
         }
 
@@ -304,7 +307,7 @@ exports.getMyApplications = async (req, res) => {
 
 // @desc    Retry AI analysis for a specific application
 // @route   POST /api/applications/:applicationId/retry-ai
-// @access  Private (Recruiter)
+// @access  Private (Recruiter, INTERVIEWER, freelancer — with delegation check)
 exports.retryAiAnalysis = async (req, res) => {
     try {
         const { applicationId } = req.params;
@@ -321,10 +324,18 @@ exports.retryAiAnalysis = async (req, res) => {
             return res.status(404).json({ message: 'Application not found' });
         }
 
-        // 2. Verify job ownership (only the recruiter who posted it can retry AI)
-        if (application.job.postedBy.toString() !== req.user.id) {
+        // 2. Verify permissions (Recruiter who posted it OR delegated Freelancer/Interviewer)
+        const job = application.job;
+        const isOwner = job.postedBy && job.postedBy.toString() === req.user.id;
+        const isDelegated = job.delegatedFreelancerId && job.delegatedFreelancerId.toString() === req.user.id;
+
+        if (!isOwner && !isDelegated) {
             return res.status(403).json({ message: 'Not authorized to modify this application' });
         }
+
+        // Billing Context: When a freelancer triggers AI parsing, the Recruiter (job owner) pays
+        const billingAccountId = (req.user.role === 'freelancer' || req.user.role === 'INTERVIEWER') ? job.postedBy : req.user.id;
+        console.log(`[retryAiAnalysis] Billing account resolved to: ${billingAccountId} (req.user.role: ${req.user.role})`);
 
         // 3. Verify it needs a retry (score is null or status is Pending AI)
         if (application.aiScore !== null && application.status !== 'Pending AI') {

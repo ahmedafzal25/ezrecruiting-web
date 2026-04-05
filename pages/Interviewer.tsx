@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, Button, Input, Badge, Modal } from '../components/UI';
 import { Video, Calendar, DollarSign, Clock, User, Briefcase, Star, Upload, MessageSquare, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, CheckCircle2, XCircle, ArrowRight, MapPin, Shield, Building2, Search } from 'lucide-react';
 import { apiRequest } from '../utils/api';
+import JobReviewModal from '../components/JobReviewModal';
 import { User as UserType, Interview, Message } from '../types';
 import InterviewsTab from '../components/InterviewsTab';
 import { FreelancerProfile } from '../components/FreelancerProfile';
@@ -23,13 +23,14 @@ export const InterviewerDashboard: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [user, setUser] = useState<UserType | null>(null);
     const [delegatedJobs, setDelegatedJobs] = useState<any[]>([]);
+    const [selectedJobToReview, setSelectedJobToReview] = useState<any>(null);
 
     useEffect(() => {
         apiRequest('/users/profile').then(setUser).catch(console.error);
         apiRequest('/interviews/my-interviews')
             .then(data => {
                 console.log('Interviewer my-interviews fetched:', data);
-                setInterviews(data);
+                setInterviews(Array.isArray(data) ? data : [...(data.activeInterviews || []), ...(data.pastInterviews || [])]);
             })
             .catch(console.error);
         apiRequest('/interviews/my-messages').then(setMessages).catch(console.error);
@@ -159,6 +160,15 @@ export const InterviewerDashboard: React.FC = () => {
                                             Delegated by: <span className="font-medium text-white">{job.postedBy?.name}</span>
                                         </p>
                                     </div>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        className="w-full mb-2 gap-1.5 border border-[#7B2CBF]/30 bg-[#7B2CBF]/10 hover:bg-[#7B2CBF]/20 text-white"
+                                        onClick={() => setSelectedJobToReview(job)}
+                                    >
+                                        <Search size={14} />
+                                        Review Job Details
+                                    </Button>
                                     <div className="flex gap-2">
                                         <Button
                                             className="flex-1 bg-green-600 hover:bg-green-700 text-white"
@@ -219,6 +229,12 @@ export const InterviewerDashboard: React.FC = () => {
                     )}
                 </Card>
             </div>
+
+            {/* Job Review Modal */}
+            <JobReviewModal 
+                job={selectedJobToReview} 
+                onClose={() => setSelectedJobToReview(null)} 
+            />
         </div>
     );
 };
@@ -688,6 +704,7 @@ export const DelegatedProjects: React.FC = () => {
     const [jobs, setJobs] = useState<DelegatedJob[]>([]);
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
+    const [selectedJobToReview, setSelectedJobToReview] = useState<any>(null);
 
     const fetchDelegations = async () => {
         setLoading(true);
@@ -870,24 +887,34 @@ export const DelegatedProjects: React.FC = () => {
 
                                 {/* Actions */}
                                 {job.delegationStatus === 'pending' && (
-                                    <div className="px-5 pb-5 flex gap-3">
+                                    <div className="px-5 pb-5">
                                         <Button
-                                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
-                                            onClick={() => handleAccept(job._id)}
-                                            disabled={isProcessing}
+                                            variant="secondary"
+                                            className="w-full mb-3 gap-1.5 border border-[#7B2CBF]/30 bg-[#7B2CBF]/10 hover:bg-[#7B2CBF]/20 text-white"
+                                            onClick={() => setSelectedJobToReview(job)}
                                         >
-                                            <CheckCircle2 size={15} />
-                                            {isProcessing ? 'Accepting...' : 'Accept Project'}
+                                            <Search size={15} />
+                                            Review Job Details
                                         </Button>
-                                        <Button
-                                            variant="outline"
-                                            className="flex-1 border-red-900/50 text-red-400 hover:bg-red-900/20 gap-1.5"
-                                            onClick={() => handleReject(job._id)}
-                                            disabled={isProcessing}
-                                        >
-                                            <XCircle size={15} />
-                                            Decline
-                                        </Button>
+                                        <div className="flex gap-3">
+                                            <Button
+                                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                                                onClick={() => handleAccept(job._id)}
+                                                disabled={isProcessing}
+                                            >
+                                                <CheckCircle2 size={15} />
+                                                {isProcessing ? 'Accepting...' : 'Accept Project'}
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                className="flex-1 border-red-900/50 text-red-400 hover:bg-red-900/20 gap-1.5"
+                                                onClick={() => handleReject(job._id)}
+                                                disabled={isProcessing}
+                                            >
+                                                <XCircle size={15} />
+                                                Decline
+                                            </Button>
+                                        </div>
                                     </div>
                                 )}
 
@@ -899,12 +926,21 @@ export const DelegatedProjects: React.FC = () => {
                                                 You're actively managing this pipeline. Review applicants, conduct interviews, and propose your top hire.
                                             </p>
                                         </div>
-                                        <Link 
-                                            to="/interviewer/pipeline" 
-                                            className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg text-sm font-semibold transition-colors"
-                                        >
-                                            Manage Pipeline &rarr;
-                                        </Link>
+                                        <div className="flex gap-3">
+                                            <Link 
+                                                to="/interviewer/pipeline" 
+                                                className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg text-sm font-semibold transition-colors"
+                                            >
+                                                Manage Pipeline &rarr;
+                                            </Link>
+                                            <Link 
+                                                to={`/interviewer/ranked/${job._id}`} 
+                                                className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] hover:from-[#9D4EDD] hover:to-[#7B2CBF] text-white py-2 rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-purple-500/20"
+                                            >
+                                                <Star className="w-4 h-4" />
+                                                Review AI Rankings
+                                            </Link>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -912,6 +948,12 @@ export const DelegatedProjects: React.FC = () => {
                     })}
                 </div>
             )}
+            
+            {/* Job Review Modal */}
+            <JobReviewModal 
+                job={selectedJobToReview} 
+                onClose={() => setSelectedJobToReview(null)} 
+            />
         </div>
     );
 };
@@ -1009,8 +1051,19 @@ export const InterviewerApplicants: React.FC = () => {
         if (!selectedApp) return;
         if (!confirm('Are you sure? This will lock the pipeline and send this candidate to the recruiter for final approval.')) return;
         
+        const notes = prompt("Enter your final assessment notes for the Recruiter (optional):") || '';
+
+        const aiReportData = {
+            aiEvaluation: selectedApp.aiInterviewReport || selectedApp.aiEvaluation || selectedApp.interviewReport || selectedApp.aiReport || {},
+            codingTestResults: selectedApp.codingTestResults || null,
+            fullAnalysis: selectedApp.aiAnalysis || null
+        };
+
         try {
-            await apiRequest(`/freelancers/delegations/${selectedApp.job._id || selectedApp.job}/propose/${selectedApp.candidate._id}`, 'POST');
+            await apiRequest(`/freelancers/delegations/${selectedApp.job._id || selectedApp.job}/propose/${selectedApp.candidate._id}`, 'POST', {
+                finalNotes: notes,
+                aiReportData: aiReportData
+            });
             alert('🎉 Candidate successfully proposed to Recruiter! Your pipeline mission is complete.');
             window.location.hash = '#/interviewer';
         } catch (error: any) {
