@@ -669,9 +669,11 @@ const InterviewRoom: React.FC = () => {
                             : eventData.type === 'copy' ? '📋'
                                 : eventData.type === 'paste' ? '📌'
                                     : eventData.type === 'face_lost' ? '👤'
-                                        : eventData.type === 'gaze' ? '👁️' : '⚠️';
+                                        : eventData.type === 'gaze' ? '👁️'
+                                            : eventData.type === 'screenshot' ? '📸' : '⚠️';
 
-                        addToast('warning', `${icon} Proctor Alert: ${eventData.candidateName || 'Candidate'} — ${eventData.detail}`);
+                        const severity = eventData.type === 'screenshot' ? 'error' : 'warning';
+                        addToast(severity, `${icon} Proctor Alert: ${eventData.candidateName || 'Candidate'} — ${eventData.detail}`);
                     }
                 } catch (err) {
                     console.error('[InterviewRoom] Error processing proctor-event:', err);
@@ -681,9 +683,15 @@ const InterviewRoom: React.FC = () => {
             // ==============================
             // Kicked from room (target user)
             // ==============================
-            socket.on('kicked-from-room', () => {
+            socket.on('kicked-from-room', async () => {
                 if (!isMounted) return;
                 addToast('error', 'You have been removed from the session by the host.');
+
+                if (!isHostRef.current) {
+                    console.log('[InterviewRoom] Flushing proctoring logs before kick...');
+                    try { await flushLogs(); } catch (e) { console.error('Failed to flush logs on kick', e); }
+                }
+
                 // Clean up all connections
                 peerConnectionsRef.current.forEach((pc) => pc.close());
                 peerConnectionsRef.current.clear();
@@ -704,9 +712,15 @@ const InterviewRoom: React.FC = () => {
             // ==============================
             // Interview Ended (Host completed interview — everyone ejected)
             // ==============================
-            socket.on('interview-ended', ({ message, endedBy }) => {
+            socket.on('interview-ended', async ({ message, endedBy }) => {
                 if (!isMounted) return;
                 addToast('info', `✅ ${message || 'This interview has been completed.'}`);
+
+                if (!isHostRef.current) {
+                    console.log('[InterviewRoom] Flushing proctoring logs before interview end...');
+                    try { await flushLogs(); } catch (e) { console.error('Failed to flush logs on end', e); }
+                }
+
                 // Clean up all connections
                 peerConnectionsRef.current.forEach((pc) => pc.close());
                 peerConnectionsRef.current.clear();
@@ -927,42 +941,43 @@ const InterviewRoom: React.FC = () => {
         setCompletingInterview(true);
 
         try {
-            // Flush proctoring logs first
+            // ── STEP 1: Flush proctoring logs (so server has full log) ────────
             if (!isRecruiter) {
                 try { await flushLogs(); } catch (e) { /* ignore */ }
             }
 
-            console.log('[InterviewRoom] 🚀 Completing interview via POST /complete...');
-            await apiRequest(`/interviews/${interview._id}/complete`, 'POST', {
-                interviewerRemarks: interviewerRemarks.trim(),
-            });
-
-            addToast('success', '✅ Interview completed! AI report is being generated.');
-
-            // Emit socket event to kick all participants
+            // ── STEP 2: KICK ALL PARTICIPANTS FIRST ───────────────────────────
+            console.log('[InterviewRoom] 🔌 Kicking all participants...');
             if (socketRef.current && interview.meetingId) {
                 socketRef.current.emit('end-interview', { meetingId: interview.meetingId });
             }
 
-            // Give a moment for the socket event to propagate, then clean up
+            // Stop all local streams immediately (free camera/mic)
+            if (localStreamRef.current) {
+                localStreamRef.current.getTracks().forEach((t) => t.stop());
+            }
+            if (screenStreamRef.current) {
+                screenStreamRef.current.getTracks().forEach((t) => t.stop());
+            }
+            peerConnectionsRef.current.forEach((pc) => pc.close());
+            peerConnectionsRef.current.clear();
+
+            // ── STEP 3: POST /complete — responds instantly, AI runs in BG ────
+            console.log('[InterviewRoom] 🚀 Posting /complete (fast — AI runs in background)...');
+            await apiRequest(`/interviews/${interview._id}/complete`, 'POST', {
+                interviewerRemarks: interviewerRemarks.trim(),
+                codingTestSessionId: adaptiveSession?.sessionId || undefined,
+            });
+
+            addToast('success', '✅ Interview completed! AI report is generating in the background.');
+
+            // ── STEP 4: Navigate to dashboard ─────────────────────────────────
             setTimeout(() => {
-                if (localStreamRef.current) {
-                    localStreamRef.current.getTracks().forEach((t) => t.stop());
-                }
-                if (screenStreamRef.current) {
-                    screenStreamRef.current.getTracks().forEach((t) => t.stop());
-                }
-                peerConnectionsRef.current.forEach((pc) => pc.close());
-                peerConnectionsRef.current.clear();
-                if (socketRef.current) {
-                    socketRef.current.disconnect();
-                }
+                if (socketRef.current) socketRef.current.disconnect();
                 const isFreelancer = user?.role === 'INTERVIEWER' || user?.role === 'freelancer';
-                const dashboardPath = isFreelancer
-                    ? '/interviewer'
-                    : '/recruiter/schedule';
-                navigate(dashboardPath);
-            }, 1500);
+                navigate(isFreelancer ? '/interviewer' : '/recruiter/schedule');
+            }, 800);
+
         } catch (err: any) {
             console.error('[InterviewRoom] ❌ Failed to complete interview:', err);
             addToast('error', err.message || 'Failed to complete interview');

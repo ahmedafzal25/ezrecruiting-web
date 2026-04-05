@@ -20,7 +20,7 @@ const interviewSchema = new mongoose.Schema({
   },
   notes: { type: String, default: '' },
   proctorLog: [{
-    type: { type: String, enum: ['tab_switch', 'copy', 'paste', 'gaze', 'face_lost'] },
+    type: { type: String, enum: ['tab_switch', 'copy', 'paste', 'gaze', 'face_lost', 'screenshot'] },
     detail: String,
     timestamp: Date,
   }],
@@ -42,6 +42,7 @@ const interviewSchema = new mongoose.Schema({
     codingScore: { type: Number, default: 0 },
     evaluatedAt: { type: Date },
   },
+  aiGenerating: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 

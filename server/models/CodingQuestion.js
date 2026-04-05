@@ -21,8 +21,8 @@ const testCaseSchema = new mongoose.Schema(
 const codingQuestionSchema = new mongoose.Schema({
     title: { type: String, required: true, trim: true },
     description: { type: String, required: true },
-    starterCode: { type: String, required: true },
-    functionName: { type: String, required: true },
+    starterCode: { type: String, default: '' },
+    functionName: { type: String, default: '' },
     difficulty: {
         type: String,
         enum: ['very_easy', 'easy', 'medium', 'hard'],

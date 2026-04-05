@@ -383,6 +383,48 @@ router.post('/:id/proctor-log', protect, async (req, res) => {
 });
 
 // ============================
+// Helper: Build red flags from a proctorLog array (rule-based, no LLM)
+// ============================
+function buildRedFlagsFromLog(proctorLog = []) {
+    const counts = {};
+    for (const e of proctorLog) {
+        counts[e.type] = (counts[e.type] || 0) + 1;
+    }
+
+    const flags = [];
+
+    if (counts.tab_switch > 0) {
+        flags.push(
+            `Candidate switched browser tabs ${counts.tab_switch} time(s) during the interview — potential use of external resources.`
+        );
+    }
+    if (counts.copy > 0 || counts.paste > 0) {
+        const c = counts.copy || 0;
+        const p = counts.paste || 0;
+        flags.push(
+            `Clipboard activity detected: ${c} copy and ${p} paste event(s) — may indicate code was sourced externally.`
+        );
+    }
+    if (counts.face_lost > 0) {
+        flags.push(
+            `Camera presence lost ${counts.face_lost} time(s) — candidate may have left the screen or covered the webcam.`
+        );
+    }
+    if (counts.gaze > 0) {
+        flags.push(
+            `Off-screen gaze detected ${counts.gaze} time(s) — candidate's attention appeared to divert from the screen.`
+        );
+    }
+    if (counts.screenshot > 0) {
+        flags.push(
+            `Screenshot attempt detected ${counts.screenshot} time(s) — candidate may have tried to capture interview content.`
+        );
+    }
+
+    return flags;
+}
+
+// ============================
 // Complete Interview — AI Report Pipeline (Phase 2 Coordinator)
 // ============================
 router.post('/:id/complete', protect, async (req, res) => {
@@ -426,46 +468,64 @@ router.post('/:id/complete', protect, async (req, res) => {
         let codingTestConducted = interview.codingTestConducted || false;
         let candidateCode = '';
 
-        if (interview.jobId?._id && interview.candidateId?._id) {
-            console.log(`[Complete] 🔍 Looking for active coding test session...`);
+        // Accept sessionId directly from the frontend (most reliable path)
+        const { codingTestSessionId } = req.body;
 
-            const testSession = await TestSession.findOne({
+        // Strategy 1: Use the sessionId from the request body or the interview document
+        const directSessionId = codingTestSessionId || interview.codingTestSessionId;
+        let testSession = null;
+
+        if (directSessionId) {
+            console.log(`[Complete] 🔍 Looking up coding test session by direct ID: ${directSessionId}`);
+            testSession = await TestSession.findById(directSessionId);
+        }
+
+        // Strategy 2: Fallback to candidate+job lookup
+        if (!testSession && interview.jobId?._id && interview.candidateId?._id) {
+            console.log(`[Complete] 🔍 Falling back to candidate+job lookup...`);
+            testSession = await TestSession.findOne({
                 candidateId: interview.candidateId._id,
                 jobId: interview.jobId._id,
-            }).sort({ startedAt: -1 }); // Get most recent session
+            }).sort({ startedAt: -1 });
+        }
 
-            if (testSession) {
-                codingTestConducted = true;
-                console.log(`[Complete]   Found test session: ${testSession._id} (status: ${testSession.status})`);
+        if (testSession) {
+            codingTestConducted = true;
+            console.log(`[Complete]   Found test session: ${testSession._id} (status: ${testSession.status})`);
+            console.log(`[Complete]   Responses: ${testSession.responses.length}`);
 
-                if (testSession.status === 'in_progress') {
-                    // Finalize the session — compute score from responses so far
-                    const totalScore = testSession.responses.reduce((sum, r) => sum + (r.score || 0), 0);
-                    testSession.finalScore = testSession.responses.length > 0
-                        ? Math.round(totalScore / testSession.responses.length)
-                        : 0;
-                    testSession.status = 'completed';
-                    testSession.completedAt = new Date();
-                    await testSession.save();
+            // Log individual response scores for debugging
+            testSession.responses.forEach((r, i) => {
+                console.log(`[Complete]     Response ${i + 1}: score=${r.score}, passed=${r.passed}`);
+            });
 
-                    console.log(`[Complete]   ✅ Coding test finalized. Score: ${testSession.finalScore}% (${testSession.responses.length} questions answered)`);
-                } else {
-                    console.log(`[Complete]   Coding test already completed. Score: ${testSession.finalScore}%`);
-                }
+            if (testSession.status === 'in_progress') {
+                // Finalize the session — compute score from responses so far
+                const totalScore = testSession.responses.reduce((sum, r) => sum + (r.score || 0), 0);
+                testSession.finalScore = testSession.responses.length > 0
+                    ? Math.round(totalScore / testSession.responses.length)
+                    : 0;
+                testSession.status = 'completed';
+                testSession.completedAt = new Date();
+                await testSession.save();
 
-                codingScore = testSession.finalScore || 0;
-                interview.codingTestSessionId = testSession._id;
-                interview.codingTestConducted = true;
-
-                // Gather last submitted code for the AI
-                const lastResponse = testSession.responses[testSession.responses.length - 1];
-                candidateCode = lastResponse?.submittedCode || '';
+                console.log(`[Complete]   ✅ Coding test finalized. Score: ${testSession.finalScore}% (${testSession.responses.length} questions answered, total raw: ${totalScore})`);
             } else {
-                console.log(`[Complete]   No coding test session found for this candidate/job combination.`);
-                codingTestConducted = false;
+                console.log(`[Complete]   Coding test already completed. Score: ${testSession.finalScore}%`);
             }
+
+            codingScore = testSession.finalScore || 0;
+            interview.codingTestSessionId = testSession._id;
+            interview.codingTestConducted = true;
+
+            // Gather ALL submitted code for the AI (not just the last response)
+            candidateCode = testSession.responses
+                .map((r, i) => `// --- Question ${i + 1} (score: ${r.score}%) ---\n${r.submittedCode || '// No code submitted'}`)
+                .join('\n\n');
+
+            console.log(`[Complete]   Total candidate code: ${candidateCode.length} chars from ${testSession.responses.length} responses`);
         } else {
-            console.log(`[Complete]   No job linked — skipping coding test lookup.`);
+            console.log(`[Complete]   ⚠️ No coding test session found. Checked: directId=${directSessionId || 'none'}, jobId=${interview.jobId?._id || 'none'}`);
             codingTestConducted = false;
         }
 
@@ -483,66 +543,19 @@ router.post('/:id/complete', protect, async (req, res) => {
             interviewerNotes: interviewerRemarks || interview.notes || '',
         };
 
-        console.log(`[Complete] 📦 AI Payload built:`);
-        console.log(`[Complete]   Code: ${aiPayload.candidateCode.length} chars`);
-        console.log(`[Complete]   Coding score: ${aiPayload.codingScore} (conducted: ${aiPayload.codingTestConducted})`);
-        console.log(`[Complete]   Proctor events: ${aiPayload.proctorEvents.length}`);
-        console.log(`[Complete]   Interviewer notes: ${aiPayload.interviewerNotes.length} chars`);
+        console.log(`[Complete] 📦 AI Payload built — ${aiPayload.proctorEvents.length} proctor events, code: ${aiPayload.candidateCode.length} chars`);
 
-        // ── Step 4: Call AI Evaluation Service ──────────────────────────────
-        let aiResult = null;
-        try {
-            console.log(`[Complete] 🤖 Calling AI service at ${AI_SERVICE_URL}/api/ai/evaluate-interview ...`);
-
-            const aiResponse = await fetch(`${AI_SERVICE_URL}/api/ai/evaluate-interview`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(aiPayload),
-            });
-
-            if (!aiResponse.ok) {
-                const errText = await aiResponse.text();
-                throw new Error(`AI Service responded with ${aiResponse.status}: ${errText}`);
-            }
-
-            aiResult = await aiResponse.json();
-            console.log(`[Complete] ✅ AI evaluation received. Suitability score: ${aiResult.suitabilityScore}`);
-            console.log(`[Complete]   Strengths: ${aiResult.strengths?.length || 0}`);
-            console.log(`[Complete]   Weaknesses: ${aiResult.weaknesses?.length || 0}`);
-            console.log(`[Complete]   Red flags: ${aiResult.redFlags?.length || 0}`);
-        } catch (aiError) {
-            console.error(`[Complete] ⚠️ AI Service call failed:`, aiError.message);
-            console.log(`[Complete]   Continuing with fallback (no AI evaluation).`);
-            // Fallback: generate a basic evaluation without the AI
-            aiResult = {
-                suitabilityScore: codingTestConducted ? codingScore : 50,
-                strengths: ['Interview completed — detailed AI analysis unavailable'],
-                weaknesses: ['AI evaluation service was unreachable'],
-                redFlags: (interview.proctorLog || []).length > 5
-                    ? ['High number of proctoring events detected']
-                    : [],
-            };
-        }
-
-        // ── Step 5: Save evaluation to Interview record ─────────────────────
-        interview.aiEvaluation = {
-            suitabilityScore: aiResult.suitabilityScore,
-            strengths: aiResult.strengths || [],
-            weaknesses: aiResult.weaknesses || [],
-            redFlags: aiResult.redFlags || [],
-            codingScore: codingScore,
-            evaluatedAt: new Date(),
-        };
+        // ── Step 4: Save interview as Completed + aiGenerating immediately ──
+        // This lets the client navigate right away without waiting for AI.
         interview.interviewerRemarks = interviewerRemarks || '';
         interview.status = 'Completed';
+        interview.aiGenerating = true;
+        interview.codingTestConducted = codingTestConducted;
 
         await interview.save();
+        console.log(`[Complete] 💾 Interview ${req.params.id} saved as Completed (AI generating in background)`);
 
-        console.log(`[Complete] 💾 Interview ${req.params.id} saved as Completed.`);
-        console.log(`[Complete]   AI suitability score: ${interview.aiEvaluation.suitabilityScore}`);
-        console.log(`${'='.repeat(60)}\n`);
-
-        // ── Step 6: Return full updated interview ───────────────────────────
+        // ── Step 5: Respond immediately to client ────────────────────────────
         const populated = await Interview.findById(interview._id)
             .populate('candidateId', 'name email profilePicture')
             .populate('recruiterId', 'name email profilePicture')
@@ -550,6 +563,83 @@ router.post('/:id/complete', protect, async (req, res) => {
             .populate('jobId', 'title company');
 
         res.json(populated);
+
+        // ── Step 6: Fire-and-forget — AI evaluation runs in background ───────
+        // IMPORTANT: No 'await' here — this runs after the response is sent.
+        (async () => {
+            console.log(`[Complete-BG] 🤖 Starting background AI evaluation for ${req.params.id}...`);
+            let aiResult = null;
+
+            try {
+                const aiAbort = new AbortController();
+                const aiTimeout = setTimeout(() => aiAbort.abort(), 10 * 60 * 1000); // 10 min max
+
+                const aiResponse = await fetch(`${AI_SERVICE_URL}/api/ai/evaluate-interview`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(aiPayload),
+                    signal: aiAbort.signal,
+                });
+
+                clearTimeout(aiTimeout);
+
+                if (!aiResponse.ok) {
+                    const errText = await aiResponse.text();
+                    throw new Error(`AI Service responded with ${aiResponse.status}: ${errText}`);
+                }
+
+                aiResult = await aiResponse.json();
+                console.log(`[Complete-BG] ✅ AI evaluation done. Score: ${aiResult.suitabilityScore}, RedFlags: ${aiResult.redFlags?.length || 0}`);
+
+            } catch (aiError) {
+                console.error(`[Complete-BG] ⚠️ AI evaluation failed:`, aiError.message);
+                // Fallback evaluation
+                aiResult = {
+                    suitabilityScore: codingTestConducted ? Math.max(codingScore, 10) : 50,
+                    strengths: ['Interview completed successfully', 'Candidate demonstrated technical engagement'],
+                    weaknesses: ['AI detailed analysis unavailable — evaluation generated from metrics'],
+                    redFlags: [],
+                };
+            }
+
+            // ── Generate red flags straight from the DB proctorLog ────────────
+            // Re-fetch the latest proctorLog so we catch any events flushed
+            // by the candidate AFTER the initial /complete call.
+            
+            // Give candidate's flushLogs() a 2.5s buffer to finish saving to DB
+            await new Promise(r => setTimeout(r, 2500));
+            
+            let finalRedFlags = [];
+            try {
+                const freshInterview = await Interview.findById(interview._id).select('proctorLog');
+                const freshLog = freshInterview?.proctorLog || [];
+                finalRedFlags = buildRedFlagsFromLog(freshLog);
+                console.log(`[Complete-BG] 🚩 Red flags generated from DB log: ${finalRedFlags.length} (log has ${freshLog.length} events)`);
+            } catch (rfErr) {
+                // Fallback: use the log we had at /complete time
+                finalRedFlags = buildRedFlagsFromLog(interview.proctorLog || []);
+                console.warn(`[Complete-BG] ⚠️ Could not re-fetch log, using snapshot: ${finalRedFlags.length} flags`);
+            }
+
+            // Patch the interview record with AI results + authoritative red flags
+            try {
+                await Interview.findByIdAndUpdate(interview._id, {
+                    aiEvaluation: {
+                        suitabilityScore: aiResult.suitabilityScore,
+                        strengths: aiResult.strengths || [],
+                        weaknesses: aiResult.weaknesses || [],
+                        redFlags: finalRedFlags,          // Always from proctorLog, never from LLM
+                        codingScore: codingScore,
+                        evaluatedAt: new Date(),
+                    },
+                    aiGenerating: false,
+                });
+                console.log(`[Complete-BG] 💾 Interview ${req.params.id} updated. aiGenerating=false, redFlags=${finalRedFlags.length}`);
+                console.log(`${'='.repeat(60)}\n`);
+            } catch (saveErr) {
+                console.error(`[Complete-BG] ❌ Failed to save AI evaluation:`, saveErr.message);
+            }
+        })();
     } catch (err) {
         console.error('[Complete] ❌ Error completing interview:', err);
         res.status(500).json({ message: 'Failed to complete interview', error: err.message });
