@@ -7,6 +7,7 @@ import { Job, User, Interview, Message, Experience } from '../types';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import InterviewsTab from '../components/InterviewsTab';
 import { ApplyWithCVModal } from '../components/ApplyWithCVModal';
+import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 // Helper for Base64
 const convertToBase64 = (file: File): Promise<string> => {
@@ -51,21 +52,31 @@ export const CandidateDashboard: React.FC = () => {
                 {/* Main Column */}
                 <div className="lg:col-span-2 space-y-6">
                     <h3 className="text-xl font-bold">Recommended for You</h3>
-                    {recommendedJobs.map(job => (
-                        <Card key={job._id} className="group hover:border-[#7B2CBF] transition-all">
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <h4 className="text-lg font-bold group-hover:text-[#7B2CBF] transition-colors">{job.title}</h4>
-                                    <p className="text-neutral-400">{job.company}</p>
-                                </div>
-                                <Badge variant="neutral">{job.type}</Badge>
-                            </div>
-                            <div className="flex items-center gap-6 mt-4 text-sm text-neutral-500">
-                                <span className="flex items-center gap-1"><MapPin size={14} /> {job.location}</span>
-                                {job.salary && <span className="flex items-center gap-1"><DollarSign size={14} /> {job.salary}</span>}
-                            </div>
+                    {recommendedJobs.length === 0 ? (
+                        <Card className="text-center py-12">
+                            <Briefcase className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+                            <h4 className="text-lg font-semibold text-neutral-300 mb-2">No Jobs Posted Yet</h4>
+                            <p className="text-neutral-500 text-sm max-w-md mx-auto">
+                                There are no open positions at the moment. Please check back later — new opportunities are posted regularly!
+                            </p>
                         </Card>
-                    ))}
+                    ) : (
+                        recommendedJobs.map(job => (
+                            <Card key={job._id} className="group hover:border-[#7B2CBF] transition-all">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h4 className="text-lg font-bold group-hover:text-[#7B2CBF] transition-colors">{job.title}</h4>
+                                        <p className="text-neutral-400">{job.company}</p>
+                                    </div>
+                                    <Badge variant="neutral">{job.type}</Badge>
+                                </div>
+                                <div className="flex items-center gap-6 mt-4 text-sm text-neutral-500">
+                                    <span className="flex items-center gap-1"><MapPin size={14} /> {job.location}</span>
+                                    {job.salary && <span className="flex items-center gap-1"><DollarSign size={14} /> {job.salary}</span>}
+                                </div>
+                            </Card>
+                        ))
+                    )}
                 </div>
 
                 {/* Side Column: Notifications */}
@@ -493,7 +504,7 @@ export const CandidateProfile: React.FC = () => {
                             {profilePicture ? (
                                 <img src={profilePicture} alt="Profile" className="w-full h-full object-cover" />
                             ) : (
-                                <img src="/assets/default-avatar.png" alt="Profile" className="w-full h-full object-cover" />
+                                <img src={DEFAULT_AVATAR} alt="Profile" className="w-full h-full object-cover" />
                             )}
                         </div>
                         <label className="cursor-pointer inline-flex items-center justify-center rounded-lg font-medium transition-all duration-200 focus:outline-none border border-neutral-700 text-neutral-300 hover:border-white hover:text-white bg-transparent px-3 py-1.5 text-sm">

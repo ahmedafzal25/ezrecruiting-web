@@ -175,11 +175,11 @@ const AIReportCard: React.FC<AIReportCardProps> = ({
                         </div>
                         <h4 className="text-sm font-bold text-emerald-400">Strengths</h4>
                         <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 rounded text-emerald-500/70 font-semibold">
-                            {evaluation.strengths.length}
+                            {(evaluation.strengths || []).length}
                         </span>
                     </div>
                     <ul className="space-y-2">
-                        {evaluation.strengths.map((s, i) => (
+                        {(evaluation.strengths || []).map((s, i) => (
                             <li key={i} className="flex items-start gap-2">
                                 <CheckCircle2 size={14} className="text-emerald-500/60 mt-0.5 flex-shrink-0" />
                                 <span className="text-xs text-neutral-300 leading-relaxed">{s}</span>
@@ -196,11 +196,11 @@ const AIReportCard: React.FC<AIReportCardProps> = ({
                         </div>
                         <h4 className="text-sm font-bold text-amber-400">Weaknesses</h4>
                         <span className="text-[10px] px-1.5 py-0.5 bg-amber-500/10 rounded text-amber-500/70 font-semibold">
-                            {evaluation.weaknesses.length}
+                            {(evaluation.weaknesses || []).length}
                         </span>
                     </div>
                     <ul className="space-y-2">
-                        {evaluation.weaknesses.map((w, i) => (
+                        {(evaluation.weaknesses || []).map((w, i) => (
                             <li key={i} className="flex items-start gap-2">
                                 <AlertTriangle size={14} className="text-amber-500/60 mt-0.5 flex-shrink-0" />
                                 <span className="text-xs text-neutral-300 leading-relaxed">{w}</span>
@@ -226,7 +226,7 @@ const AIReportCard: React.FC<AIReportCardProps> = ({
             )}
 
             {/* Red Flags Section — Conditional */}
-            {evaluation.redFlags.length > 0 && (
+            {(evaluation.redFlags?.length ?? 0) > 0 && (
                 <div className="p-4 rounded-xl bg-red-500/5 border border-red-500/20 relative overflow-hidden">
                     {/* Urgent visual indicator */}
                     <div className="absolute top-0 left-0 w-1 h-full bg-red-500" />
@@ -242,12 +242,12 @@ const AIReportCard: React.FC<AIReportCardProps> = ({
                             </p>
                         </div>
                         <span className="ml-auto text-xs px-2 py-0.5 bg-red-500/15 rounded-full text-red-400 font-bold">
-                            {evaluation.redFlags.length} flag{evaluation.redFlags.length !== 1 ? 's' : ''}
+                            {evaluation.redFlags!.length} flag{evaluation.redFlags!.length !== 1 ? 's' : ''}
                         </span>
                     </div>
 
                     <ul className="space-y-2 pl-2">
-                        {evaluation.redFlags.map((flag, i) => (
+                        {evaluation.redFlags!.map((flag, i) => (
                             <li key={i} className="flex items-start gap-2 p-2 rounded-lg bg-red-500/5 border border-red-500/10">
                                 <ShieldAlert size={13} className="text-red-500/70 mt-0.5 flex-shrink-0" />
                                 <span className="text-xs text-red-200/80 leading-relaxed">{flag}</span>

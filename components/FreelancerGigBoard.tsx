@@ -3,6 +3,7 @@ import { Card, Button, Badge } from './UI';
 import { Briefcase, Calendar, MapPin, Search } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { useToast } from './Toast';
+import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 interface Gig {
     _id: string;
@@ -97,7 +98,7 @@ export const FreelancerGigBoard: React.FC = () => {
                             <div className="flex justify-between items-start">
                                 <div className="flex items-center gap-3">
                                     <img
-                                        src={gig.recruiterId?.profilePicture || "/assets/default-company.png"}
+                                        src={gig.recruiterId?.profilePicture || DEFAULT_AVATAR}
                                         alt="Company"
                                         className="w-12 h-12 rounded-lg bg-neutral-800 object-cover border border-neutral-800"
                                     />

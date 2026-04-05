@@ -8,6 +8,7 @@ import { User as UserType, Interview, Message } from '../types';
 import InterviewsTab from '../components/InterviewsTab';
 import { FreelancerProfile } from '../components/FreelancerProfile';
 import { ApplicantReviewModal } from '../components/ApplicantReviewModal';
+import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 const convertToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -300,7 +301,7 @@ export const InterviewerProfile: React.FC = () => {
             <div className="grid md:grid-cols-3 gap-8">
                 <Card className="md:col-span-1 text-center p-6 h-fit">
                     <div className="relative w-32 h-32 mx-auto mb-4 group">
-                        <img src={profilePicture || "/assets/default-avatar.png"} className="w-full h-full rounded-full object-cover border-4 border-[#7B2CBF]" alt="Profile" />
+                        <img src={profilePicture || DEFAULT_AVATAR} className="w-full h-full rounded-full object-cover border-4 border-[#7B2CBF]" alt="Profile" />
                         <label className="absolute bottom-0 right-0 p-2 bg-neutral-800 rounded-full border border-neutral-700 hover:bg-neutral-700 transition-colors cursor-pointer">
                             <Upload size={16} />
                             <input type="file" className="hidden" accept="image/*" onChange={handleProfilePictureChange} />
@@ -866,7 +867,7 @@ export const DelegatedProjects: React.FC = () => {
                                     {/* Recruiter info */}
                                     <div className="flex items-center gap-2.5 pt-2 border-t border-neutral-800">
                                         <img
-                                            src={job.postedBy?.profilePicture || '/assets/default-avatar.png'}
+                                            src={job.postedBy?.profilePicture || DEFAULT_AVATAR}
                                             alt={job.postedBy?.name}
                                             className="w-8 h-8 rounded-full object-cover border border-neutral-700"
                                         />
@@ -1120,7 +1121,7 @@ export const InterviewerApplicants: React.FC = () => {
                                 </div>
                                 <div className="flex items-start justify-between">
                                     <div className="flex gap-3">
-                                        <img src={data.profilePicture || "/assets/default-avatar.png"} className="w-12 h-12 rounded-lg object-cover" alt="profile" />
+                                        <img src={data.profilePicture || DEFAULT_AVATAR} className="w-12 h-12 rounded-lg object-cover" alt="profile" />
                                         <div>
                                             <h3 className="font-semibold text-white">{data.name}</h3>
                                             <p className="text-xs text-neutral-400">{data.headline}</p>

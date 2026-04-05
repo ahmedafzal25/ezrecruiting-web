@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal, Badge } from './UI';
 import { apiRequest } from '../utils/api';
 import { Briefcase, Link as LinkIcon, Star, Calendar } from 'lucide-react';
+import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 interface Experience {
     title: string;
@@ -73,7 +74,7 @@ export const FreelancerPublicProfileModal: React.FC<{
                     {/* Header */}
                     <div className="flex items-center gap-5">
                         <img 
-                            src={profile.profilePicture || '/assets/default-avatar.png'} 
+                            src={profile.profilePicture || DEFAULT_AVATAR} 
                             alt={profile.name}
                             className="w-20 h-20 rounded-full border-4 border-neutral-800 object-cover"
                         />

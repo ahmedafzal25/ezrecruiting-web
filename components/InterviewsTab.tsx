@@ -36,7 +36,7 @@ interface InterviewData {
     };
 }
 
-interface CandidateOption { _id: string; name: string; email: string; }
+interface CandidateOption { _id: string; name: string; email: string; appliedJobIds?: string[]; }
 interface JobOption { _id: string; title: string; company: string; }
 
 interface InterviewsTabProps {
@@ -100,6 +100,7 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
 
     // Schedule form (Recruiter only)
     const [candidates, setCandidates] = useState<CandidateOption[]>([]);
+    const [allJobs, setAllJobs] = useState<JobOption[]>([]);
     const [jobs, setJobs] = useState<JobOption[]>([]);
     const [formData, setFormData] = useState({
         candidateId: '', jobId: '', scheduledDate: '', scheduledTime: '', notes: '',
@@ -159,6 +160,7 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
         setShowScheduleModal(true);
         try {
             const jobsData = await apiRequest('/jobs/my-jobs');
+            setAllJobs(jobsData || []);
             setJobs(jobsData || []);
         } catch (err: any) {
             addToast('error', 'Failed to load your jobs');
@@ -443,7 +445,7 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
 
                                         {/* Right: badge + AI report */}
                                         <div className="flex items-center gap-2 flex-shrink-0">
-                                            {interview.status === 'Completed' && (
+                                            {role !== 'CANDIDATE' && interview.status === 'Completed' && (
                                                 interview.aiGenerating ? (
                                                     /* Pulsing badge while AI is generating */
                                                     <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs font-semibold text-amber-400 whitespace-nowrap animate-pulse">
@@ -473,8 +475,8 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                 </section>
             )}
 
-            {/* ── AI Report Detail Modal ─────────────────── */}
-            {selectedReport && selectedReport.aiEvaluation && (
+            {/* ── AI Report Detail Modal (hidden from Candidates) ── */}
+            {role !== 'CANDIDATE' && selectedReport && selectedReport.aiEvaluation && (
                 <div
                     className="fixed inset-0 z-[9999] flex items-center justify-center"
                     style={{ backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
@@ -535,7 +537,21 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                         </label>
                         <select
                             value={formData.candidateId}
-                            onChange={(e) => setFormData({ ...formData, candidateId: e.target.value })}
+                            onChange={(e) => {
+                                const selectedCandidateId = e.target.value;
+                                setFormData({ ...formData, candidateId: selectedCandidateId, jobId: '' });
+                                // Filter jobs to only those this candidate applied for
+                                if (selectedCandidateId) {
+                                    const cand = candidates.find(c => c._id === selectedCandidateId);
+                                    if (cand?.appliedJobIds?.length) {
+                                        setJobs(allJobs.filter(j => cand.appliedJobIds!.includes(j._id)));
+                                    } else {
+                                        setJobs(allJobs);
+                                    }
+                                } else {
+                                    setJobs(allJobs);
+                                }
+                            }}
                             className="w-full bg-black/50 border border-neutral-800 rounded-lg py-2.5 px-4 text-white focus:border-[#7B2CBF] focus:ring-1 focus:ring-[#7B2CBF] transition-all outline-none"
                         >
                             <option value="">Select a candidate...</option>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Modal, Button, Badge } from './UI';
 import { User, Briefcase, GraduationCap, FileText, Download, BarChart2, Video, MessageSquare, Code2 } from 'lucide-react';
+import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 interface ApplicantReviewModalProps {
     isOpen: boolean;
@@ -43,7 +44,7 @@ export const ApplicantReviewModal: React.FC<ApplicantReviewModalProps> = ({
                 {/* Header Section */}
                 <div className="flex items-start gap-6 border-b border-neutral-800 pb-6 mb-6">
                     <img
-                        src={data.profilePicture || "/assets/default-avatar.png"}
+                        src={data.profilePicture || DEFAULT_AVATAR}
                         className="w-24 h-24 rounded-xl object-cover border-2 border-neutral-800"
                         alt="profile"
                     />
