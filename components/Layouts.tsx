@@ -4,7 +4,7 @@ import { NavLink, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import {
   Menu, X, Briefcase, User, LayoutDashboard, Settings,
   Users, Calendar, FileText, LogOut, MessageSquare, Video,
-  Sun, Moon, ChevronRight, Bell
+  Sun, Moon, ChevronRight, Bell, Star, Award, Archive
 } from 'lucide-react';
 import { Button } from './UI';
 import { useTheme } from './ThemeContext';
@@ -186,6 +186,9 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
     { name: 'Jobs', path: '/recruiter/jobs', icon: Briefcase },
     { name: 'Applicants', path: '/recruiter/applicants', icon: Users },
     { name: 'Service Marketplace', path: '/recruiter/hire-interviewer', icon: Video },
+    { name: 'Review Hires', path: '/recruiter/review-hires', icon: Star },
+    { name: 'New Hirings', path: '/recruiter/new-hirings', icon: Award },
+    { name: 'Past Jobs', path: '/recruiter/past-jobs', icon: Archive },
     { name: 'Schedule', path: '/recruiter/schedule', icon: Calendar },
     { name: 'Profile', path: '/recruiter/profile', icon: User },
   ];

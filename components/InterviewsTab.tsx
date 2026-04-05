@@ -85,6 +85,8 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
     const { addToast, ToastContainer } = useToast();
 
     const [interviews, setInterviews] = useState<InterviewData[]>([]);
+    const [upcomingInterviews, setUpcomingInterviews] = useState<InterviewData[]>([]);
+    const [pastInterviews, setPastInterviews] = useState<InterviewData[]>([]);
     const [loading, setLoading] = useState(true);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
 
@@ -111,7 +113,17 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
         try {
             setLoading(true);
             const data = await apiRequest('/interviews/my-interviews');
-            setInterviews(data);
+            if (Array.isArray(data)) {
+                 // Fallback for endpoints that haven't been migrated yet (or test mocks)
+                 setInterviews(data);
+                 setUpcomingInterviews(data.filter(i => !['Completed', 'Cancelled', 'Pending'].includes(i.status) && new Date(i.scheduledTime) >= new Date()));
+                 setPastInterviews(data.filter(i => ['Completed', 'Cancelled'].includes(i.status) || new Date(i.scheduledTime) < new Date()));
+            } else {
+                 // New `{ activeInterviews, pastInterviews }` structure
+                 setInterviews([...(data.activeInterviews || []), ...(data.pastInterviews || [])]);
+                 setUpcomingInterviews(data.activeInterviews || []);
+                 setPastInterviews(data.pastInterviews || []);
+            }
         } catch (err: any) {
             addToast('error', err.message || 'Failed to load interviews');
         } finally {
@@ -188,33 +200,6 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
     const formatTime = (s: string) =>
         new Date(s).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
-    // ── Splitting logic (status-first, date as tiebreaker) ───
-    const now = new Date();
-    const userString = localStorage.getItem('user');
-    const currentUser = userString ? JSON.parse(userString) : null;
-
-    const TERMINAL_STATUSES = ['Completed', 'Cancelled'];
-
-    const upcomingInterviews = interviews.filter((i) => {
-        // Status-first: completed/cancelled ALWAYS go to history
-        if (TERMINAL_STATUSES.includes(i.status)) return false;
-        // Pending goes to history too (not yet confirmed)
-        if (i.status === 'Pending') return false;
-        // Past-due (but not terminal) also go to history
-        if (new Date(i.scheduledTime) < now) return false;
-        // Recruiter: hide delegated interviews
-        if (role === 'RECRUITER' && currentUser) {
-            const myId = String(currentUser.id || currentUser._id);
-            const isDelegated = i.interviewerId && i.interviewerId._id && i.interviewerId._id !== myId;
-            if (isDelegated) return false;
-        }
-        return true;
-    });
-
-    const pastInterviews = interviews.filter((i) =>
-        TERMINAL_STATUSES.includes(i.status) || new Date(i.scheduledTime) < now
-    );
-
     // ── Filtered history (search bar) ───────────────────────
     const filteredHistory = pastInterviews.filter((i) => {
         if (!historySearch.trim()) return true;
@@ -229,8 +214,10 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
     });
 
     // ── Person shown for this role ───────────────────────────
-    const getOtherPerson = (i: InterviewData) =>
-        role === 'RECRUITER' ? i.candidateId : i.recruiterId;
+    const getOtherPerson = (i: InterviewData) => {
+        if (role === 'CANDIDATE') return i.interviewerId || i.recruiterId;
+        return i.candidateId; // Both Recruiter and Interviewer should see the Candidate
+    };
 
     // ─────────────────────────────────────────────────────────
     // Loading state

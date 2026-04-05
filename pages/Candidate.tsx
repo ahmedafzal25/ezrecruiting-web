@@ -27,7 +27,7 @@ export const CandidateDashboard: React.FC = () => {
     useEffect(() => {
         apiRequest('/users/profile').then(setUser).catch(console.error);
         apiRequest('/jobs').then(data => setRecommendedJobs(data.slice(0, 3))).catch(console.error);
-        apiRequest('/interviews/my-interviews').then(setInterviews).catch(console.error);
+        apiRequest('/interviews/my-interviews').then(data => setInterviews(Array.isArray(data) ? data : [...(data.activeInterviews || []), ...(data.pastInterviews || [])])).catch(console.error);
         apiRequest('/interviews/my-messages').then(setMessages).catch(console.error);
     }, []);
 
