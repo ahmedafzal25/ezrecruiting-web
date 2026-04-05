@@ -30,7 +30,7 @@ import { apiRequest } from '../utils/api';
 
 /** A single proctoring event recorded during an interview. */
 export interface ProctoringEvent {
-    type: 'tab_switch' | 'copy' | 'paste' | 'gaze' | 'face_lost';
+    type: 'tab_switch' | 'copy' | 'paste' | 'gaze' | 'face_lost' | 'screenshot';
     detail: string;
     timestamp: string; // ISO 8601
 }
@@ -108,8 +108,11 @@ const MAX_RECONNECT_ATTEMPTS = 3;
 /** Delay between reconnection attempts (ms). */
 const RECONNECT_DELAY_MS = 5000;
 
-/** Cooldown for face_lost events (ms) — suppress duplicates within this window. */
-const FACE_LOST_COOLDOWN_MS = 5000;
+/** Grace period before firing face_lost (ms) — face must be continuously absent. */
+const FACE_LOST_GRACE_MS = 5000;
+
+/** Cooldown after face_lost fires (ms) — hard lock that ignores ALL face-lost processing. */
+const FACE_LOST_COOLDOWN_MS = 20000;
 
 /** Sustained off-center gaze duration (ms) before logging a gaze event. */
 const GAZE_SUSTAINED_MS = 3000;
@@ -146,6 +149,8 @@ export function useProctoring(config: UseProctoringProps): ProctoringReturn {
     const gazeOffCenterSince = useRef<number | null>(null);
     const gazeEventFired = useRef(false); // true if we already logged the sustained gaze
     const lastFaceLostTime = useRef<number>(0);
+    const faceLostGraceStart = useRef<number | null>(null); // when face was first lost (grace timer)
+    const faceLostCooldownActive = useRef(false); // hard lock — true = ignore all face_lost
 
     // ── Helper: add an event to the log ──────────────────────────────
     const addEvent = useCallback((type: ProctoringEvent['type'], detail: string) => {
@@ -188,18 +193,45 @@ export function useProctoring(config: UseProctoringProps): ProctoringReturn {
                         const now = Date.now();
 
                         if (!data.face_detected) {
-                            // ── FACE LOST — cooldown to prevent flooding ──
-                            if (now - lastFaceLostTime.current > FACE_LOST_COOLDOWN_MS) {
-                                lastFaceLostTime.current = now;
-                                addEvent('face_lost', 'No face detected in frame');
-                                console.log('[Proctor] 👤 Face lost event fired (cooldown reset)');
+                            // ── FACE LOST — 5s grace + 20s hard cooldown lock ──
+
+                            // If cooldown is active, check if it has expired
+                            if (faceLostCooldownActive.current) {
+                                if (now - lastFaceLostTime.current >= FACE_LOST_COOLDOWN_MS) {
+                                    faceLostCooldownActive.current = false;
+                                    console.log('[Proctor] 🔓 Face-lost cooldown expired — monitoring resumed');
+                                } else {
+                                    // Still in cooldown — completely ignore this frame
+                                    // (do NOT start a grace timer, do NOT fire)
+                                }
                             }
+
+                            // Only process if NOT in cooldown
+                            if (!faceLostCooldownActive.current) {
+                                if (faceLostGraceStart.current === null) {
+                                    // First frame with no face — start grace timer
+                                    faceLostGraceStart.current = now;
+                                    console.log('[Proctor] 👤 Face lost — grace period started (5s)');
+                                } else {
+                                    const graceElapsed = now - faceLostGraceStart.current;
+                                    if (graceElapsed >= FACE_LOST_GRACE_MS) {
+                                        // Grace period expired — FIRE the event and LOCK
+                                        lastFaceLostTime.current = now;
+                                        faceLostCooldownActive.current = true;
+                                        faceLostGraceStart.current = null;
+                                        addEvent('face_lost', `No face detected for ${(graceElapsed / 1000).toFixed(1)}s`);
+                                        console.log(`[Proctor] 🚨 Face lost event fired — 20s hard cooldown lock activated`);
+                                    }
+                                }
+                            }
+
                             // Reset gaze tracking when face is lost
                             lastGazeDirection.current = 'center';
                             gazeOffCenterSince.current = null;
                             gazeEventFired.current = false;
                         } else if (data.gaze === 'center') {
-                            // ── CENTER — reset off-center tracking ──
+                            // ── CENTER — reset off-center tracking + face grace ──
+                            faceLostGraceStart.current = null; // Face is back — cancel grace
                             if (lastGazeDirection.current !== 'center') {
                                 console.log('[Proctor] 👁️ Gaze returned to center');
                             }
@@ -208,6 +240,7 @@ export function useProctoring(config: UseProctoringProps): ProctoringReturn {
                             gazeEventFired.current = false;
                         } else {
                             // ── OFF-CENTER GAZE — sustained detection ──
+                            faceLostGraceStart.current = null; // Face detected — cancel grace
                             if (data.gaze !== lastGazeDirection.current) {
                                 // Direction changed — reset the sustained timer
                                 lastGazeDirection.current = data.gaze;
@@ -330,13 +363,38 @@ export function useProctoring(config: UseProctoringProps): ProctoringReturn {
 
         // Keyboard fallback: Monaco may swallow native paste events, so
         // we also detect Ctrl+V / Cmd+V at the document level.
+        // Also detect screenshot keystrokes (PrintScreen, Cmd+Shift+3/4, Win+Shift+S).
         const handleKeydown = (e: KeyboardEvent) => {
+            // ── Paste detection ──
             if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
                 const now = Date.now();
                 if (now - lastPasteEventTime < 500) return; // dedup
                 lastPasteEventTime = now;
                 console.log('[Proctor] 📋 Paste detected via keyboard shortcut (Ctrl/Cmd+V)');
                 addEvent('paste', 'Paste action detected in the coding sandbox');
+            }
+
+            // ── Screenshot detection (aggressive — covers Windows, macOS, Linux) ──
+            const key = e.key;
+            const isScreenshotKey =
+                // Windows: PrintScreen, Alt+PrintScreen
+                key === 'PrintScreen' ||
+                // Windows: Win+Shift+S (Snipping Tool)
+                (e.metaKey && e.shiftKey && key.toLowerCase() === 's') ||
+                // Windows: Win+PrintScreen
+                (e.metaKey && key === 'PrintScreen') ||
+                // macOS: Cmd+Shift+3 (full screen), Cmd+Shift+4 (selection), Cmd+Shift+5 (toolbar)
+                (e.metaKey && e.shiftKey && (key === '3' || key === '4' || key === '5')) ||
+                // Alt+PrintScreen (Windows active window capture)
+                (e.altKey && key === 'PrintScreen') ||
+                // Ctrl+PrintScreen (some Linux DEs)
+                (e.ctrlKey && key === 'PrintScreen') ||
+                // Linux: Ctrl+Shift+PrintScreen (Gnome area screenshot)
+                (e.ctrlKey && e.shiftKey && key === 'PrintScreen');
+
+            if (isScreenshotKey) {
+                console.log('[Proctor] 📸 SCREENSHOT ATTEMPT DETECTED — key:', key, 'meta:', e.metaKey, 'alt:', e.altKey, 'shift:', e.shiftKey);
+                addEvent('screenshot', `Screenshot attempt detected (key: ${key}, meta: ${e.metaKey}, alt: ${e.altKey}, shift: ${e.shiftKey})`);
             }
         };
 

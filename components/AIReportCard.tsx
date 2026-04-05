@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldAlert, CheckCircle2, AlertTriangle, Code, Award, TrendingUp, TrendingDown } from 'lucide-react';
+import { ShieldAlert, CheckCircle2, AlertTriangle, Code, Award, TrendingUp, TrendingDown, ExternalLink } from 'lucide-react';
 
 interface AIEvaluation {
     suitabilityScore: number;
@@ -16,6 +16,9 @@ interface AIReportCardProps {
     jobTitle?: string;
     interviewerRemarks?: string;
     codingTestConducted?: boolean;
+    codingTestSessionId?: string;
+    jobId?: string;
+    candidateId?: string;
 }
 
 const AIReportCard: React.FC<AIReportCardProps> = ({
@@ -24,6 +27,9 @@ const AIReportCard: React.FC<AIReportCardProps> = ({
     jobTitle,
     interviewerRemarks,
     codingTestConducted = true,
+    codingTestSessionId,
+    jobId,
+    candidateId,
 }) => {
     const [animatedScore, setAnimatedScore] = useState(0);
 
@@ -142,6 +148,19 @@ const AIReportCard: React.FC<AIReportCardProps> = ({
                                 </div>
                             )}
                         </div>
+
+                        {/* View Coding Test Results button */}
+                        {codingTestConducted && jobId && candidateId && (
+                            <a
+                                href={`#/recruiter/coding-test-result/${jobId}/candidate/${candidateId}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 px-3 py-1.5 mt-3 bg-[#7B2CBF]/10 border border-[#7B2CBF]/30 hover:bg-[#7B2CBF]/20 rounded-lg transition-colors text-xs font-semibold text-[#9D4EDD] no-underline w-fit"
+                            >
+                                <ExternalLink size={13} />
+                                View Coding Test Results
+                            </a>
+                        )}
                     </div>
                 </div>
             </div>

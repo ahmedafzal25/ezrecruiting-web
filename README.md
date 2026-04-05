@@ -33,9 +33,14 @@ npm install
 cd ..
 ```
 
-### 3. Set Up the AI Service (Python)
+### 3. Set Up the AI Service (Python & Ollama)
 
-Create and activate a virtual environment, then install the dependencies and the necessary language model:
+The AI Evaluation service uses an LLM. You must install **Ollama** locally to run the model.
+1. Download and install Ollama from [ollama.com](https://ollama.com)
+2. Pull the required model: `ollama pull llama3` (or `phi3` if your RAM is limited to 8GB)
+3. Ensure the Ollama server is running (usually automatic on startup).
+
+Create and activate a virtual environment, then install the Python dependencies:
 
 ```bash
 cd ai-service
@@ -93,20 +98,21 @@ GEMINI_API_KEY=your_gemini_api_key
 
 ## Running the Application
 
-From the project root, you can start all four services simultaneously with a single command:
+From the project root, you can start all five services simultaneously with a single command:
 
 ```bash
 npm run dev
 ```
 
-This concurrently launches the following services:
+This concurrently launches the following services (color-coded in terminal):
 
-| Service | Address / Port | Description |
-|---|---|---|
-| **Frontend (Vite)** | `http://localhost:3000` | Main React application |
-| **Backend (Express)** | `http://localhost:5001` | Core REST API and Socket.io server |
-| **AI Service (FastAPI)** | `http://localhost:8000` | CV parsing and candidate ranking |
-| **Proctoring Service (FastAPI)** | `http://localhost:8001` | WebSocket server for real-time video/gaze proctoring |
+| Service | Address / Port | Color | Description |
+|---|---|---|---|
+| **Frontend (Vite)** | `http://localhost:3000` | Cyan | Main React application |
+| **Backend (Express)** | `http://localhost:5001` | Green | Core REST API and Socket.io server |
+| **AI Service (FastAPI)** | `http://localhost:8000` | Magenta | CV parsing, candidate ranking, and AI interview evaluation (Ollama) |
+| **Proctoring Service (FastAPI)** | `http://localhost:8001` | Yellow | WebSocket server for real-time video/gaze proctoring |
+| **Ollama** | `http://localhost:11434` | Blue | Local LLM server (auto-starts, graceful skip if not installed) |
 
 ## Project Structure
 

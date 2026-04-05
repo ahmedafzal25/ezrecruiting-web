@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Calendar, Clock, Video, Plus, Briefcase,
-    Search, X, Award, User
+    Search, X, Award, User, Loader2
 } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { Card, Button, Badge, Modal, Input } from './UI';
@@ -24,6 +24,8 @@ interface InterviewData {
     jobId?: { _id: string; title: string; company: string };
     interviewerRemarks?: string;
     codingTestConducted?: boolean;
+    codingTestSessionId?: string;
+    aiGenerating?: boolean;
     aiEvaluation?: {
         suitabilityScore: number;
         strengths: string[];
@@ -130,6 +132,28 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
             setLoading(false);
         }
     };
+
+    // ── Poll interviews that are still generating AI reports ────────────────
+    useEffect(() => {
+        const generatingIds = interviews
+            .filter(i => i.aiGenerating === true)
+            .map(i => i._id);
+
+        if (generatingIds.length === 0) return;
+
+        const poll = setInterval(async () => {
+            try {
+                // Re-fetch the full list so we get updated aiGenerating + aiEvaluation
+                const fresh = await apiRequest('/interviews/my-interviews');
+                setInterviews(fresh);
+                // Stop polling once none are generating
+                const stillGenerating = fresh.filter((i: InterviewData) => i.aiGenerating === true);
+                if (stillGenerating.length === 0) clearInterval(poll);
+            } catch { /* silently ignore poll errors */ }
+        }, 10_000); // check every 10 seconds
+
+        return () => clearInterval(poll);
+    }, [interviews.map(i => `${i._id}:${i.aiGenerating}`).join(',')]);
 
     const openScheduleModal = async () => {
         setShowScheduleModal(true);
@@ -419,14 +443,23 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
 
                                         {/* Right: badge + AI report */}
                                         <div className="flex items-center gap-2 flex-shrink-0">
-                                            {interview.status === 'Completed' && interview.aiEvaluation && (
-                                                <button
-                                                    onClick={() => setSelectedReport(interview)}
-                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#7B2CBF]/10 border border-[#7B2CBF]/30 hover:bg-[#7B2CBF]/20 rounded-lg transition-colors text-xs font-semibold text-[#9D4EDD] whitespace-nowrap"
-                                                >
-                                                    <Award size={12} />
-                                                    AI Report
-                                                </button>
+                                            {interview.status === 'Completed' && (
+                                                interview.aiGenerating ? (
+                                                    /* Pulsing badge while AI is generating */
+                                                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs font-semibold text-amber-400 whitespace-nowrap animate-pulse">
+                                                        <Loader2 size={12} className="animate-spin" />
+                                                        AI Generating...
+                                                    </div>
+                                                ) : interview.aiEvaluation ? (
+                                                    /* Report is ready */
+                                                    <button
+                                                        onClick={() => setSelectedReport(interview)}
+                                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#7B2CBF]/10 border border-[#7B2CBF]/30 hover:bg-[#7B2CBF]/20 rounded-lg transition-colors text-xs font-semibold text-[#9D4EDD] whitespace-nowrap"
+                                                    >
+                                                        <Award size={12} />
+                                                        AI Report
+                                                    </button>
+                                                ) : null
                                             )}
                                             <Badge variant={statusBadgeVariant[interview.status] || 'neutral'}>
                                                 {interview.status}
@@ -479,6 +512,9 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
                                 jobTitle={selectedReport.jobId?.title}
                                 interviewerRemarks={selectedReport.interviewerRemarks}
                                 codingTestConducted={selectedReport.codingTestConducted}
+                                codingTestSessionId={selectedReport.codingTestSessionId}
+                                jobId={selectedReport.jobId?._id}
+                                candidateId={selectedReport.candidateId?._id}
                             />
                         </div>
                     </div>

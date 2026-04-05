@@ -499,6 +499,15 @@ const submitAnswer = async (req, res) => {
       `(${question.difficulty}/${question.category}) — ` +
       `${question.visibleTestCases.length} visible, ${question.hiddenTestCases.length} hidden`);
 
+    // ── Determine execution mode ──────────────────────────────────────
+    //   MODE A (function-call): Question has a functionName → append print(fn(input))
+    //   MODE B (stdin):         No functionName → pipe tc.input as stdin
+    const useFunctionMode = question.functionName && question.functionName.trim() !== '';
+    console.log(`[CodingTest] ═══════════════════════════════════════════════════`);
+    console.log(`[CodingTest] Execution mode: ${useFunctionMode ? 'FUNCTION-CALL' : 'STDIN'}`);
+    console.log(`[CodingTest]   functionName: "${question.functionName || '(none)'}"`);
+    console.log(`[CodingTest]   Submitted code length: ${submittedCode.length} chars`);
+
     // ── PASS 1 & 2: All test cases combined (scoring) ─────────────────────────
     const allTestCases = [...question.visibleTestCases, ...question.hiddenTestCases];
     let passedCases = 0;
@@ -509,26 +518,45 @@ const submitAnswer = async (req, res) => {
     let hiddenPassed = 0;
     let currentIndex = 0;
 
-    // Loop through all cases. DO NOT use 'break' or 'return' inside the loop.
+    console.log(`[CodingTest]   Total test cases: ${totalCases} (${question.visibleTestCases.length} visible, ${hiddenTotal} hidden)`);
+
+    // Loop through all cases
     for (const tc of allTestCases) {
-        // Construct temporary Python string that combines code with a hidden execution block
-        const functionCall = `print(${question.functionName}(${tc.input}))`;
-        const executableCode = `${submittedCode}\n\n${functionCall}`;
-        
-        // Run without any stdin payload
-        const output = await executePython(executableCode);
-        const isMatch = output.trim() === tc.expectedOutput.trim();
+        const isVisible = currentIndex < question.visibleTestCases.length;
+        const caseLabel = isVisible ? `visible[${currentIndex}]` : `hidden[${currentIndex - question.visibleTestCases.length}]`;
+
+        let output;
+
+        if (useFunctionMode) {
+            // MODE A: Function-call — append print(fn(args)) and run with no stdin
+            const functionCall = `print(${question.functionName}(${tc.input}))`;
+            const executableCode = `${submittedCode}\n\n${functionCall}`;
+            console.log(`[CodingTest]   [${caseLabel}] MODE-A: Running → print(${question.functionName}(${tc.input.substring(0, 80)}))`);
+            output = await executePython(executableCode, '');
+        } else {
+            // MODE B: Stdin — run the submitted code as-is, providing tc.input via stdin
+            console.log(`[CodingTest]   [${caseLabel}] MODE-B: Running with stdin → "${(tc.input || '').substring(0, 80)}"`);
+            output = await executePython(submittedCode, tc.input || '');
+        }
+
+        const actualTrimmed = (output || '').trim();
+        const expectedTrimmed = (tc.expectedOutput || '').trim();
+        const isMatch = actualTrimmed === expectedTrimmed;
+
+        console.log(`[CodingTest]   [${caseLabel}] Expected: "${expectedTrimmed.substring(0, 120)}"`);
+        console.log(`[CodingTest]   [${caseLabel}] Actual  : "${actualTrimmed.substring(0, 120)}"`);
+        console.log(`[CodingTest]   [${caseLabel}] Match   : ${isMatch ? '✅ PASS' : '❌ FAIL'}`);
         
         if (isMatch) {
             passedCases++;
-            if (currentIndex >= question.visibleTestCases.length) hiddenPassed++;
+            if (!isVisible) hiddenPassed++;
         }
 
-        if (currentIndex < question.visibleTestCases.length) {
+        if (isVisible) {
              visibleResultsForClient.push({
                 input: tc.input,
                 expectedOutput: tc.expectedOutput,
-                actualOutput: output.trim(),
+                actualOutput: actualTrimmed,
                 passed: isMatch,
                 errorType: isMatch ? null : classifyError(output),
             });
@@ -543,13 +571,6 @@ const submitAnswer = async (req, res) => {
     // "Pass" logic is up to interpretation, traditionally 100%
     const passed = passedCases === totalCases && totalCases > 0;
 
-    // AI Logic Analysis
-    const aiAnalysis = await analyzeCodeWithAI(submittedCode, testScore);
-    const logicScore = Number(aiAnalysis.logicScore) || testScore;
-    
-    // Final Blended Score (70% automated, 30% AI)
-    const finalScoreMix = Math.round((testScore * 0.7) + (logicScore * 0.3));
-
     // Hidden summary (counts only, no actual output)
     const hiddenSummaryForClient = {
       total:  hiddenTotal,
@@ -557,7 +578,18 @@ const submitAnswer = async (req, res) => {
       failed: hiddenTotal - hiddenPassed,
     };
 
+    console.log(`[CodingTest] ───────────────────────────────────────────────────`);
+    console.log(`[CodingTest] RESULT: ${passedCases}/${totalCases} passed (${testScore}%) — ${passed ? 'PASSED' : 'FAILED'}`);
+
+    // AI Logic Analysis
+    const aiAnalysis = await analyzeCodeWithAI(submittedCode, testScore);
+    const logicScore = Number(aiAnalysis.logicScore) || testScore;
+    
+    // Final Blended Score (70% automated, 30% AI)
+    const finalScoreMix = Math.round((testScore * 0.7) + (logicScore * 0.3));
+
     console.log('[CodingTest] Original Test Score: ' + testScore + '%, AI Logic Score: ' + logicScore + '%, Final Blended Score: ' + finalScoreMix + '%');
+    console.log(`[CodingTest] ═══════════════════════════════════════════════════`);
 
     // ── Persist response & update adaptive state ───────────────────────────
     session.responses.push({ 

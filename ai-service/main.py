@@ -10,8 +10,12 @@ PDF files are processed strictly in-memory (no disk writes).
 """
 
 import io
+import json
 import logging
+import os
+import re
 import string
+import time
 from typing import List
 
 import pdfplumber
@@ -401,39 +405,65 @@ class InterviewEvalResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Interview Evaluation Endpoint (Phase 1 — Mocked)
+# Ollama Configuration
 # ---------------------------------------------------------------------------
-@app.post("/api/ai/evaluate-interview", response_model=InterviewEvalResponse)
-async def evaluate_interview(payload: InterviewEvalRequest):
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "phi3")  # Default: phi3 (3.8B, fast)
+
+# Cache for the resolved model name (to avoid querying /api/tags on every request)
+_resolved_model: str | None = None
+
+
+async def _resolve_ollama_model() -> str:
     """
-    AI-Powered Post-Interview Evaluation (MOCKED).
+    Resolve the best available Ollama model.
 
-    Accepts interview data (code, proctoring events, interviewer notes)
-    and returns a structured evaluation with:
-      - suitabilityScore (0-100)
-      - strengths
-      - weaknesses
-      - redFlags (based strictly on proctoring events)
-
-    In production, this would call a real LLM. For now, returns a
-    realistic mocked response with dynamic red-flag generation.
+    Priority:
+      1. OLLAMA_MODEL env var (if explicitly set by operator)
+      2. Auto-detected first model from GET /api/tags
+      3. Fall back to OLLAMA_MODEL default if /api/tags is unreachable
     """
-    logger.info("=" * 60)
-    logger.info("[AI-Eval] 📥 Received evaluation request")
-    logger.info("[AI-Eval]   Interview ID   : %s", payload.interviewId)
-    logger.info("[AI-Eval]   Code length    : %d chars", len(payload.candidateCode))
-    logger.info("[AI-Eval]   Coding score   : %d", payload.codingScore)
-    logger.info("[AI-Eval]   Coding test run: %s", payload.codingTestConducted)
-    logger.info("[AI-Eval]   Proctor events : %d", len(payload.proctorEvents))
-    logger.info("[AI-Eval]   Notes length   : %d chars", len(payload.interviewerNotes))
+    global _resolved_model
+    if _resolved_model is not None:
+        return _resolved_model
 
-    # ── Dynamic Red Flags from Proctoring Events ─────────────────────────
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+            models = data.get("models", [])
+            if models:
+                # Prefer the env-configured model if it's actually installed
+                installed_names = [m["name"] for m in models]
+                logger.info("[AI-Eval] 🗂️  Installed Ollama models: %s", installed_names)
+                for m in models:
+                    if m["name"].startswith(OLLAMA_MODEL.split(":")[0]):
+                        _resolved_model = m["name"]
+                        logger.info("[AI-Eval] ✅ Using configured model: %s", _resolved_model)
+                        return _resolved_model
+                # Configured model not found — use whatever is installed
+                _resolved_model = models[0]["name"]
+                logger.warning(
+                    "[AI-Eval] ⚠️  Model '%s' not installed. Using first available: %s",
+                    OLLAMA_MODEL, _resolved_model
+                )
+                return _resolved_model
+    except Exception as e:
+        logger.warning("[AI-Eval] ⚠️  Could not query Ollama model list: %s", e)
+
+    # Final fallback
+    _resolved_model = OLLAMA_MODEL
+    return _resolved_model
+
+
+def _build_red_flags(proctor_events: List[ProctoringEvent]) -> list[str]:
+    """Generate red flags from proctoring events (used by both Ollama and fallback)."""
     red_flags: list[str] = []
     event_counts: dict[str, int] = {}
-    for evt in payload.proctorEvents:
+    for evt in proctor_events:
         event_counts[evt.type] = event_counts.get(evt.type, 0) + 1
-
-    logger.info("[AI-Eval]   Event breakdown: %s", event_counts)
 
     if event_counts.get("tab_switch", 0) > 0:
         count = event_counts["tab_switch"]
@@ -460,17 +490,23 @@ async def evaluate_interview(payload: InterviewEvalRequest):
             f"Suspicious gaze deviation detected {count} time(s) — "
             f"candidate may have been reading from another screen."
         )
+    if event_counts.get("screenshot", 0) > 0:
+        count = event_counts["screenshot"]
+        red_flags.append(
+            f"Screenshot attempt detected {count} time(s) — "
+            f"candidate may have tried to capture interview content."
+        )
+    return red_flags
 
-    logger.info("[AI-Eval]   Generated %d red flag(s)", len(red_flags))
 
-    # ── Mock Strengths & Weaknesses ──────────────────────────────────────
+def _generate_fallback(payload: InterviewEvalRequest, red_flags: list[str]) -> InterviewEvalResponse:
+    """Fallback mock evaluation when Ollama is unavailable."""
     strengths = [
         "Demonstrated strong problem-solving approach with clear logical thinking",
         "Code structure was clean and well-organized with meaningful variable names",
         "Good understanding of core data structures and their trade-offs",
         "Communicated thought process effectively while coding",
     ]
-
     weaknesses = [
         "Could improve time complexity analysis — did not discuss Big-O",
         "Limited error handling and input validation in submitted code",
@@ -478,37 +514,16 @@ async def evaluate_interview(payload: InterviewEvalRequest):
         "Would benefit from writing unit tests alongside solutions",
     ]
 
-    # ── Mock Suitability Score ───────────────────────────────────────────
-    # Base score of 72 (realistic mid-high), adjusted by red flags and
-    # coding performance. If no coding test was conducted, score is based
-    # solely on behavioral signals (notes + proctoring).
     base_score = 72
-
     if payload.codingTestConducted:
-        # Blend coding score into the evaluation
-        coding_influence = (payload.codingScore - 50) * 0.3  # ±15 range
+        coding_influence = (payload.codingScore - 50) * 0.3
         base_score = int(base_score + coding_influence)
-        logger.info(
-            "[AI-Eval]   Coding influence: %+.1f → adjusted base: %d",
-            coding_influence, base_score
-        )
     else:
-        logger.info(
-            "[AI-Eval]   No coding test conducted — score based on behavioral assessment only"
-        )
-        # Remove coding-related weakness
         weaknesses = [w for w in weaknesses if "time complexity" not in w.lower()]
-        strengths.append(
-            "Interview was conducted as a behavioral/conversational assessment"
-        )
+        strengths.append("Interview was conducted as a behavioral/conversational assessment")
 
-    # Penalize for red flags
     flag_penalty = len(red_flags) * 5
     final_score = max(0, min(100, base_score - flag_penalty))
-
-    logger.info("[AI-Eval]   Red flag penalty: -%d", flag_penalty)
-    logger.info("[AI-Eval] 📤 Final suitability score: %d", final_score)
-    logger.info("=" * 60)
 
     return InterviewEvalResponse(
         suitabilityScore=final_score,
@@ -516,6 +531,154 @@ async def evaluate_interview(payload: InterviewEvalRequest):
         weaknesses=weaknesses,
         redFlags=red_flags,
     )
+
+
+# ---------------------------------------------------------------------------
+# Interview Evaluation Endpoint (Ollama LLM with Mock Fallback)
+# ---------------------------------------------------------------------------
+@app.post("/api/ai/evaluate-interview", response_model=InterviewEvalResponse)
+async def evaluate_interview(payload: InterviewEvalRequest):
+    """
+    AI-Powered Post-Interview Evaluation.
+
+    Sends interview data to a local Ollama LLM for analysis.
+    Falls back to a dynamic mock response if Ollama is unreachable.
+    """
+    logger.info("=" * 60)
+    logger.info("[AI-Eval] 📥 Received evaluation request")
+    logger.info("[AI-Eval]   Interview ID   : %s", payload.interviewId)
+    logger.info("[AI-Eval]   Code length    : %d chars", len(payload.candidateCode))
+    logger.info("[AI-Eval]   Coding score   : %d", payload.codingScore)
+    logger.info("[AI-Eval]   Coding test run: %s", payload.codingTestConducted)
+    logger.info("[AI-Eval]   Proctor events : %d", len(payload.proctorEvents))
+    logger.info("[AI-Eval]   Notes length   : %d chars", len(payload.interviewerNotes))
+
+    # ── Always compute red flags from proctoring events ──────────────────
+    red_flags = _build_red_flags(payload.proctorEvents)
+    logger.info("[AI-Eval]   Generated %d red flag(s) from proctoring", len(red_flags))
+
+    # ── Try Ollama LLM ───────────────────────────────────────────────────
+    try:
+        import httpx
+
+        start_time = time.time()
+        active_model = await _resolve_ollama_model()
+        logger.info("[AI-Eval] 🤖 Attempting Ollama LLM at %s (model: %s)", OLLAMA_URL, active_model)
+
+        # Build the prompt
+        proctor_summary = ""
+        if payload.proctorEvents:
+            event_counts: dict[str, int] = {}
+            for evt in payload.proctorEvents:
+                event_counts[evt.type] = event_counts.get(evt.type, 0) + 1
+            proctor_summary = ", ".join(f"{k}: {v}" for k, v in event_counts.items())
+        else:
+            proctor_summary = "No proctoring events recorded."
+
+        code_section = ""
+        if payload.codingTestConducted and payload.candidateCode:
+            # Limit code to first 2000 chars to avoid token overflow
+            trimmed_code = payload.candidateCode[:2000]
+            code_section = f"\nCandidate's Code (score: {payload.codingScore}%):\n```\n{trimmed_code}\n```"
+        elif not payload.codingTestConducted:
+            code_section = "\nNo coding test was conducted — this was a behavioral interview only."
+
+        prompt = f"""You are an expert technical interviewer evaluating a candidate after a live interview.
+
+Analyze the following data and respond with ONLY a valid JSON object (no markdown, no explanation, no code fences).
+
+INTERVIEW DATA:
+- Coding Test Conducted: {payload.codingTestConducted}
+- Automated Coding Score: {payload.codingScore}%
+- Proctoring Events: {proctor_summary}
+- Interviewer's Notes: {payload.interviewerNotes or 'No notes provided'}
+{code_section}
+
+Respond with this exact JSON structure:
+{{
+  "suitabilityScore": <integer 0-100>,
+  "strengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
+  "weaknesses": ["<weakness 1>", "<weakness 2>", "<weakness 3>"]
+}}
+
+Rules:
+- suitabilityScore must be 0-100 reflecting overall candidate suitability
+- Provide exactly 3-5 strengths and 3-5 weaknesses
+- Base your analysis on the code quality, proctoring behavior, and interviewer notes
+- If no coding test, focus on behavioral assessment from the notes
+- Respond with ONLY the JSON object, nothing else"""
+
+        logger.info("[AI-Eval]   Prompt length: %d chars", len(prompt))
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
+        ) as client:
+            ollama_response = await client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": active_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": 1024,
+                    },
+                },
+            )
+            ollama_response.raise_for_status()
+
+        elapsed = time.time() - start_time
+        logger.info("[AI-Eval]   ⏱️ Ollama responded in %.2f seconds", elapsed)
+
+        result_data = ollama_response.json()
+        raw_text = result_data.get("response", "")
+        logger.info("[AI-Eval]   Raw LLM output length: %d chars", len(raw_text))
+        logger.info("[AI-Eval]   Raw LLM output: %s", raw_text[:500])
+
+        # Parse JSON from LLM response — try to extract even if wrapped in markdown
+        json_match = re.search(r'\{[\s\S]*\}', raw_text)
+        if not json_match:
+            raise ValueError("No JSON object found in LLM response")
+
+        parsed = json.loads(json_match.group())
+
+        # Validate and clamp
+        score = max(0, min(100, int(parsed.get("suitabilityScore", 50))))
+        strengths = parsed.get("strengths", ["Analysis completed"])
+        weaknesses = parsed.get("weaknesses", ["No specific weaknesses identified"])
+
+        # Ensure they're lists of strings
+        if not isinstance(strengths, list):
+            strengths = [str(strengths)]
+        if not isinstance(weaknesses, list):
+            weaknesses = [str(weaknesses)]
+
+        logger.info("[AI-Eval] ✅ Ollama evaluation parsed successfully")
+        logger.info("[AI-Eval]   Suitability: %d | Strengths: %d | Weaknesses: %d",
+                    score, len(strengths), len(weaknesses))
+        logger.info("[AI-Eval]   Generation time: %.2fs", elapsed)
+        logger.info("=" * 60)
+
+        # Merge LLM analysis with proctoring red flags
+        return InterviewEvalResponse(
+            suitabilityScore=score,
+            strengths=strengths,
+            weaknesses=weaknesses,
+            redFlags=red_flags,  # Always from proctoring, not LLM
+        )
+
+    except Exception as e:
+        import traceback
+        logger.warning("[AI-Eval] ⚠️ Ollama call failed: [%s] %s", type(e).__name__, repr(e))
+        logger.warning("[AI-Eval]   Traceback: %s", traceback.format_exc())
+        logger.info("[AI-Eval]   Falling back to dynamic mock evaluation")
+
+        fallback = _generate_fallback(payload, red_flags)
+
+        logger.info("[AI-Eval] 📤 Fallback suitability score: %d", fallback.suitabilityScore)
+        logger.info("=" * 60)
+
+        return fallback
 
 
 # ---------------------------------------------------------------------------
