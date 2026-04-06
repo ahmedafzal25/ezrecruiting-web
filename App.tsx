@@ -18,6 +18,7 @@ import AdaptiveResultReview from './pages/AdaptiveResultReview';
 import CodingAssessment from './pages/CodingAssessment';
 import FreelancerGigBoard from './components/FreelancerGigBoard';
 import SubmitFeedback from './pages/SubmitFeedback';
+import MessagesTab from './components/MessagesTab';
 
 const App: React.FC = () => {
   console.log("App Component Mounting...");
@@ -67,6 +68,7 @@ const App: React.FC = () => {
             <Route path="review-hires" element={<CompletedDelegations />} />
             <Route path="new-hirings" element={<NewHirings />} />
             <Route path="past-jobs" element={<PastJobs />} />
+            <Route path="messages" element={<MessagesTab />} />
             <Route path="*" element={<Navigate to="/recruiter/dashboard" replace />} />
           </Route>
 
@@ -78,6 +80,7 @@ const App: React.FC = () => {
             <Route path="profile" element={<CandidateProfile />} />
             <Route path="applications" element={<CandidateApplications />} />
             <Route path="interviews" element={<CandidateInterviews />} />
+            <Route path="messages" element={<MessagesTab />} />
             <Route path="*" element={<Navigate to="/candidate/dashboard" replace />} />
           </Route>
 
@@ -93,6 +96,7 @@ const App: React.FC = () => {
             <Route path="requests" element={<InterviewerRequests />} />
             <Route path="profile" element={<InterviewerProfile />} />
             <Route path="feedback/:id" element={<SubmitFeedback />} />
+            <Route path="messages" element={<MessagesTab />} />
             <Route path="*" element={<Navigate to="/interviewer" replace />} />
           </Route>
 

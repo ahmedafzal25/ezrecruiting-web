@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { apiRequest } from '../utils/api';
 import { Card, Badge, Button } from '../components/UI';
 import { Users, Briefcase, Trash2, CheckCircle, LayoutDashboard } from 'lucide-react';
+import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 // --- Components ---
 
@@ -224,7 +225,7 @@ export const AdminApprovals: React.FC = () => {
           {pending.map(user => (
             <div key={user._id} className="flex items-center justify-between p-4 bg-neutral-800/50 rounded-lg border border-neutral-700">
               <div className="flex items-center gap-4">
-                <img src={user.profilePicture || "/assets/default-avatar.png"} className="w-12 h-12 rounded-full" alt="profile" />
+                <img src={user.profilePicture || DEFAULT_AVATAR} className="w-12 h-12 rounded-full" alt="profile" />
                 <div>
                   <h4 className="font-bold text-white">{user.name}</h4>
                   <p className="text-sm text-neutral-400">{user.email}</p>

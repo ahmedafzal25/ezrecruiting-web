@@ -4,6 +4,7 @@ import { Plus, Search, Calendar, Clock, Video, FileText, ChevronRight, BarChart2
 import { apiRequest } from '../utils/api';
 import { Job, User as UserType } from '../types';
 import InterviewsTab from '../components/InterviewsTab';
+import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 // Helper to convert file to base64
 const convertToBase64 = (file: File): Promise<string> => {
@@ -427,7 +428,7 @@ export const Applicants: React.FC = () => {
                                 </div>
                                 <div className="flex items-start justify-between">
                                     <div className="flex gap-3">
-                                        <img src={data.profilePicture || "/assets/default-avatar.png"} className="w-12 h-12 rounded-lg object-cover" alt="profile" />
+                                        <img src={data.profilePicture || DEFAULT_AVATAR} className="w-12 h-12 rounded-lg object-cover" alt="profile" />
                                         <div>
                                             <h3 className="font-semibold text-white">{data.name}</h3>
                                             <p className="text-xs text-neutral-400">{data.headline}</p>
@@ -459,7 +460,10 @@ export const Applicants: React.FC = () => {
                 application={selectedApp}
                 onStatusUpdate={handleStatusUpdate}
                 onSchedule={() => setIsScheduleOpen(true)}
-                onMessage={() => setIsMessageOpen(true)}
+                onMessage={() => {
+                    const candidateId = selectedApp?.candidate?._id;
+                    if (candidateId) window.location.href = `#/recruiter/messages?userId=${candidateId}`;
+                }}
             />
 
             {/* Schedule Interview Modal */}
@@ -612,7 +616,7 @@ export const FindInterviewers: React.FC = () => {
                 {interviewers.map(user => (
                     <Card key={user._id} className="flex flex-col gap-4 group hover:border-[#7B2CBF]/50">
                         <div className="flex items-center gap-4">
-                            <img src={user.profilePicture || "/assets/default-avatar.png"} className="w-16 h-16 rounded-xl object-cover" alt="profile" />
+                            <img src={user.profilePicture || DEFAULT_AVATAR} className="w-16 h-16 rounded-xl object-cover" alt="profile" />
                             <div>
                                 <h3 className="font-bold text-white">{user.name}</h3>
                                 <p className="text-xs text-[#7B2CBF]">{(user as any).profile?.headline || 'Expert Interviewer'}</p>
@@ -693,7 +697,7 @@ export const FindInterviewers: React.FC = () => {
                 {selectedInterviewer && (
                     <div className="space-y-6">
                         <div className="flex items-center gap-4 border-b border-neutral-800 pb-4">
-                            <img src={selectedInterviewer.profilePicture || "/assets/default-avatar.png"} className="w-20 h-20 rounded-xl object-cover" alt="profile" />
+                            <img src={selectedInterviewer.profilePicture || DEFAULT_AVATAR} className="w-20 h-20 rounded-xl object-cover" alt="profile" />
                             <div>
                                 <h3 className="text-xl font-bold text-white">{selectedInterviewer.name}</h3>
                                 <p className="text-[#7B2CBF]">{(selectedInterviewer as any).profile?.headline || 'Professional Interviewer'}</p>
@@ -821,7 +825,7 @@ export const RecruiterProfile: React.FC = () => {
             <div className="grid md:grid-cols-3 gap-8">
                 <Card className="md:col-span-1 text-center p-6 h-fit">
                     <div className="relative w-32 h-32 mx-auto mb-4 group">
-                        <img src={profilePicture || "/assets/default-avatar.png"} className="w-full h-full rounded-full object-cover border-4 border-[#7B2CBF]" alt="Profile" />
+                        <img src={profilePicture || DEFAULT_AVATAR} className="w-full h-full rounded-full object-cover border-4 border-[#7B2CBF]" alt="Profile" />
                         <label className="absolute bottom-0 right-0 p-2 bg-neutral-800 rounded-full border border-neutral-700 hover:bg-neutral-700 transition-colors cursor-pointer">
                             <Upload size={16} />
                             <input type="file" className="hidden" accept="image/*" onChange={handleProfilePictureChange} />
@@ -1032,7 +1036,7 @@ export const ServiceMarketplace: React.FC = () => {
                             {/* Freelancer header */}
                             <div className="p-5 border-b border-neutral-800/70 flex items-center gap-3">
                                 <img
-                                    src={svc.freelancerId.profilePicture || '/assets/default-avatar.png'}
+                                    src={svc.freelancerId.profilePicture || DEFAULT_AVATAR}
                                     alt={svc.freelancerId.name}
                                     className="w-11 h-11 rounded-full object-cover border-2 border-[#7B2CBF]/30"
                                 />
@@ -1081,21 +1085,32 @@ export const ServiceMarketplace: React.FC = () => {
                             </div>
 
                             {/* Footer: price + CTA */}
-                            <div className="p-5 pt-0 flex items-center justify-between">
-                                <div>
-                                    <span className="text-2xl font-black text-white">${svc.price}</span>
-                                    <span className="text-xs text-neutral-500 ml-1">/ project</span>
+                            <div className="p-5 pt-0 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <span className="text-2xl font-black text-white">${svc.price}</span>
+                                        <span className="text-xs text-neutral-500 ml-1">/ project</span>
+                                    </div>
+                                    <Button
+                                        size="sm"
+                                        onClick={() => { 
+                                            setSelected(svc); 
+                                            setSelectedJobId('');
+                                        }}
+                                        className="bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] hover:from-[#9D4EDD] hover:to-[#7B2CBF] text-white"
+                                    >
+                                        <Send size={14} className="mr-1.5" />
+                                        Delegate Job
+                                    </Button>
                                 </div>
                                 <Button
                                     size="sm"
-                                    onClick={() => { 
-                                        setSelected(svc); 
-                                        setSelectedJobId('');
-                                    }}
-                                    className="bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] hover:from-[#9D4EDD] hover:to-[#7B2CBF] text-white"
+                                    variant="outline"
+                                    className="w-full border-neutral-700 text-neutral-300 hover:text-white hover:border-[#7B2CBF]"
+                                    onClick={() => window.location.href = `#/recruiter/messages?userId=${svc.freelancerId._id}`}
                                 >
-                                    <Send size={14} className="mr-1.5" />
-                                    Delegate Job
+                                    <MessageSquare size={14} className="mr-1.5" />
+                                    Message Interviewer
                                 </Button>
                             </div>
                         </div>
@@ -1110,7 +1125,7 @@ export const ServiceMarketplace: React.FC = () => {
                         {/* Freelancer summary */}
                         <div className="flex items-center gap-3 p-4 bg-neutral-900 rounded-xl border border-neutral-800">
                             <img
-                                src={selected.freelancerId.profilePicture || '/assets/default-avatar.png'}
+                                src={selected.freelancerId.profilePicture || DEFAULT_AVATAR}
                                 className="w-12 h-12 rounded-full object-cover border-2 border-[#7B2CBF]/30"
                                 alt={selected.freelancerId.name}
                             />
@@ -1334,7 +1349,7 @@ export const CompletedDelegations: React.FC = () => {
                                     {/* Freelancer Info */}
                                     <div className="flex items-center gap-3 p-3 bg-neutral-800/50 rounded-lg border border-neutral-700/50">
                                         <img
-                                            src={freelancer.profilePicture || '/assets/default-avatar.png'}
+                                            src={freelancer.profilePicture || DEFAULT_AVATAR}
                                             alt={freelancer.name}
                                             className="w-10 h-10 rounded-full object-cover border-2 border-[#7B2CBF]/50"
                                         />
@@ -1348,7 +1363,7 @@ export const CompletedDelegations: React.FC = () => {
                                     {/* Proposed Candidate Header */}
                                     <div className="flex items-center gap-4 p-4 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
                                         <img
-                                            src={candidate.profilePicture || '/assets/default-avatar.png'}
+                                            src={candidate.profilePicture || DEFAULT_AVATAR}
                                             alt={candidate.name}
                                             className="w-14 h-14 rounded-full object-cover border-2 border-emerald-500/50"
                                         />
@@ -1492,7 +1507,10 @@ export const CompletedDelegations: React.FC = () => {
                 application={selectedCandidate}
                 onStatusUpdate={() => {}}
                 onSchedule={() => {}}
-                onMessage={() => {}}
+                onMessage={() => {
+                    const candidateId = selectedCandidate?.candidate?._id;
+                    if (candidateId) window.location.href = `#/recruiter/messages?userId=${candidateId}`;
+                }}
             />
 
             {/* ── AI Report UI Modal ─────────────────── */}
@@ -1642,7 +1660,7 @@ export const NewHirings: React.FC = () => {
                                     <div className="flex items-center gap-3 p-3.5 rounded-xl border border-emerald-500/15" style={{ background: 'linear-gradient(to right, rgba(16,185,129,0.05), transparent)' }}>
                                         <div className="relative flex-shrink-0">
                                             <img
-                                                src={candidate.profilePicture || '/assets/default-avatar.png'}
+                                                src={candidate.profilePicture || DEFAULT_AVATAR}
                                                 alt={candidate.name}
                                                 className="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/40"
                                             />
@@ -1667,7 +1685,7 @@ export const NewHirings: React.FC = () => {
                                     {freelancer?.name && (
                                         <div className="flex items-center gap-3 p-3 rounded-xl border border-[#7B2CBF]/20" style={{ background: 'rgba(123,44,191,0.06)' }}>
                                             <img
-                                                src={freelancer.profilePicture || '/assets/default-avatar.png'}
+                                                src={freelancer.profilePicture || DEFAULT_AVATAR}
                                                 alt={freelancer.name}
                                                 className="w-8 h-8 rounded-full object-cover border-2 border-[#7B2CBF]/40 flex-shrink-0"
                                             />
@@ -1879,7 +1897,7 @@ export const PastJobs: React.FC = () => {
                             {job.proposedCandidateId && (
                                 <div className="hidden md:flex items-center gap-2 flex-shrink-0">
                                     <img
-                                        src={job.proposedCandidateId.profilePicture || '/assets/default-avatar.png'}
+                                        src={job.proposedCandidateId.profilePicture || DEFAULT_AVATAR}
                                         alt={job.proposedCandidateId.name}
                                         className="w-7 h-7 rounded-full object-cover border border-emerald-500/40"
                                     />

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card, Button, Badge } from '../components/UI';
 import { ArrowLeft, Trophy, TrendingUp, AlertCircle, ChevronDown, ChevronUp, Search, Users, Sparkles, RefreshCw, Loader2, Code2 } from 'lucide-react';
 import { apiRequest } from '../utils/api';
+import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 interface RankedCandidate {
     _id: string;
@@ -282,7 +283,7 @@ export const RankedCandidates: React.FC = () => {
                                 {/* Candidate */}
                                 <div className="col-span-3 flex items-center gap-3">
                                     <img
-                                        src={app.candidate?.profilePicture || '/assets/default-avatar.png'}
+                                        src={app.candidate?.profilePicture || DEFAULT_AVATAR}
                                         alt={app.candidate?.name}
                                         className="w-9 h-9 rounded-lg object-cover border border-neutral-700"
                                     />

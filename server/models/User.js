@@ -20,11 +20,11 @@ const userSchema = new mongoose.Schema({
   bio: { type: String },
   averageRating: { type: Number, default: 0 },
   experience: [{
-    title: { type: String, required: true },
+    designation: { type: String, required: true },
     company: { type: String, required: true },
-    startDate: { type: Date, required: true },
-    endDate: { type: Date }, // null indicates "Present"
-    description: { type: String }
+    from: { type: String, required: true },
+    to: { type: String }, // empty indicates "Present"
+    work: { type: String }
   }],
   projects: [{
     title: { type: String, required: true },

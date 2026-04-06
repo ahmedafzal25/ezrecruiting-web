@@ -102,8 +102,31 @@ const waitingRooms = new Map(); // roomId -> Set of { socketId, userId, userName
 const PROCTOR_THROTTLE_MS = 3000;
 const proctorThrottles = new Map();
 
+// ============================
+// Direct Messaging: userId -> socketId map
+// ============================
+const userSocketMap = new Map(); // userId (string) -> socketId (string)
+
 io.on('connection', (socket) => {
   console.log(`[Socket.IO] User connected: ${socket.userName} (${socket.userId})`);
+
+  // --- Direct Messaging: Register user for message routing ---
+  socket.on('register-user', (userId) => {
+    if (userId) {
+      userSocketMap.set(userId, socket.id);
+      console.log(`[Socket.IO][DM] Registered user ${userId} -> ${socket.id}`);
+    }
+  });
+
+  // --- Direct Messaging: Relay message to recipient ---
+  socket.on('send-message', (data) => {
+    // data: { receiverId, message (the full message object) }
+    const recipientSocketId = userSocketMap.get(data.receiverId);
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit('receive-message', data.message);
+      console.log(`[Socket.IO][DM] Relayed message from ${socket.userId} to ${data.receiverId}`);
+    }
+  });
 
   // Helper: checks if a role string is a host (recruiter or org admin)
   const isHostRole = (role) =>
@@ -472,6 +495,15 @@ io.on('connection', (socket) => {
 
     // Clean up proctor throttle map for this socket
     proctorThrottles.delete(socket.id);
+
+    // Clean up direct messaging map
+    for (const [userId, socketId] of userSocketMap.entries()) {
+      if (socketId === socket.id) {
+        userSocketMap.delete(userId);
+        console.log(`[Socket.IO][DM] Unregistered user ${userId}`);
+        break;
+      }
+    }
   });
 });
 

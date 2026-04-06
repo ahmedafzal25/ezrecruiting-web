@@ -7,6 +7,7 @@ import { Job, User, Interview, Message, Experience } from '../types';
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import InterviewsTab from '../components/InterviewsTab';
 import { ApplyWithCVModal } from '../components/ApplyWithCVModal';
+import { DEFAULT_AVATAR } from '../utils/defaultAvatar';
 
 // Helper for Base64
 const convertToBase64 = (file: File): Promise<string> => {
@@ -51,21 +52,31 @@ export const CandidateDashboard: React.FC = () => {
                 {/* Main Column */}
                 <div className="lg:col-span-2 space-y-6">
                     <h3 className="text-xl font-bold">Recommended for You</h3>
-                    {recommendedJobs.map(job => (
-                        <Card key={job._id} className="group hover:border-[#7B2CBF] transition-all">
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <h4 className="text-lg font-bold group-hover:text-[#7B2CBF] transition-colors">{job.title}</h4>
-                                    <p className="text-neutral-400">{job.company}</p>
-                                </div>
-                                <Badge variant="neutral">{job.type}</Badge>
-                            </div>
-                            <div className="flex items-center gap-6 mt-4 text-sm text-neutral-500">
-                                <span className="flex items-center gap-1"><MapPin size={14} /> {job.location}</span>
-                                {job.salary && <span className="flex items-center gap-1"><DollarSign size={14} /> {job.salary}</span>}
-                            </div>
+                    {recommendedJobs.length === 0 ? (
+                        <Card className="text-center py-12">
+                            <Briefcase className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+                            <h4 className="text-lg font-semibold text-neutral-300 mb-2">No Jobs Posted Yet</h4>
+                            <p className="text-neutral-500 text-sm max-w-md mx-auto">
+                                There are no open positions at the moment. Please check back later — new opportunities are posted regularly!
+                            </p>
                         </Card>
-                    ))}
+                    ) : (
+                        recommendedJobs.map(job => (
+                            <Card key={job._id} className="group hover:border-[#7B2CBF] transition-all">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h4 className="text-lg font-bold group-hover:text-[#7B2CBF] transition-colors">{job.title}</h4>
+                                        <p className="text-neutral-400">{job.company}</p>
+                                    </div>
+                                    <Badge variant="neutral">{job.type}</Badge>
+                                </div>
+                                <div className="flex items-center gap-6 mt-4 text-sm text-neutral-500">
+                                    <span className="flex items-center gap-1"><MapPin size={14} /> {job.location}</span>
+                                    {job.salary && <span className="flex items-center gap-1"><DollarSign size={14} /> {job.salary}</span>}
+                                </div>
+                            </Card>
+                        ))
+                    )}
                 </div>
 
                 {/* Side Column: Notifications */}
@@ -318,10 +329,11 @@ export const CandidateProfile: React.FC = () => {
                     firstName: user.firstName || user.name.split(' ')[0] || '',
                     lastName: user.lastName || user.name.split(' ').slice(1).join(' ') || '',
                     headline: profileData.headline || '',
-                    bio: profileData.bio || '',
-                    skills: profileData.skills ? profileData.skills.join(', ') : ''
+                    bio: profileData.bio || user.bio || '',
+                    skills: profileData.skills?.length ? profileData.skills.join(', ') : (user.skills?.join(', ') || '')
                 });
-                setExperience(profileData.experience || []);
+                // Fallback to reading from the main user object if the profile sub-document is empty
+                setExperience(profileData.experience?.length ? profileData.experience : (user.experience || []));
                 setEducation(profileData.education || []);
                 setProfilePicture(user.profilePicture || null);
                 if (user.resumeUrl || profileData.resume) {
@@ -347,6 +359,15 @@ export const CandidateProfile: React.FC = () => {
         const fromDate = new Date(newExp.from);
         const toDate = newExp.to ? new Date(newExp.to) : null;
         const today = new Date();
+
+        if (fromDate.getFullYear() < 1950 || fromDate.getFullYear() > 2100) {
+            alert("Start year must be between 1950 and 2100.");
+            return;
+        }
+        if (toDate && (toDate.getFullYear() < 1950 || toDate.getFullYear() > 2100)) {
+            alert("End year must be between 1950 and 2100.");
+            return;
+        }
 
         if (fromDate > today) {
             alert("Start date cannot be in the future.");
@@ -382,6 +403,15 @@ export const CandidateProfile: React.FC = () => {
         const fromDate = new Date(newEdu.from);
         const toDate = newEdu.to ? new Date(newEdu.to) : null;
         const today = new Date();
+
+        if (fromDate.getFullYear() < 1950 || fromDate.getFullYear() > 2100) {
+            alert("Start year must be between 1950 and 2100.");
+            return;
+        }
+        if (toDate && (toDate.getFullYear() < 1950 || toDate.getFullYear() > 2100)) {
+            alert("End year must be between 1950 and 2100.");
+            return;
+        }
 
         if (fromDate > today) {
             alert("Start date cannot be in the future.");
@@ -493,7 +523,7 @@ export const CandidateProfile: React.FC = () => {
                             {profilePicture ? (
                                 <img src={profilePicture} alt="Profile" className="w-full h-full object-cover" />
                             ) : (
-                                <img src="/assets/default-avatar.png" alt="Profile" className="w-full h-full object-cover" />
+                                <img src={DEFAULT_AVATAR} alt="Profile" className="w-full h-full object-cover" />
                             )}
                         </div>
                         <label className="cursor-pointer inline-flex items-center justify-center rounded-lg font-medium transition-all duration-200 focus:outline-none border border-neutral-700 text-neutral-300 hover:border-white hover:text-white bg-transparent px-3 py-1.5 text-sm">
@@ -696,7 +726,18 @@ export const CandidateApplications: React.FC = () => {
                             <p className="text-[#7B2CBF] text-sm mb-4">{app.job?.company || 'Unknown Company'} • {app.job?.location || 'Remote'}</p>
                             <div className="mt-auto pt-4 border-t border-neutral-800 flex justify-between items-center">
                                 <span className="text-xs text-neutral-500">Applied: {new Date(app.appliedAt).toLocaleDateString()}</span>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    {app.job?.postedBy && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="px-3 py-1 text-xs border-neutral-700 text-neutral-300 hover:text-white hover:border-[#7B2CBF]"
+                                            onClick={() => window.location.href = `#/candidate/messages?userId=${app.job.postedBy._id}`}
+                                        >
+                                            <MessageSquare size={12} className="mr-1" />
+                                            Message Recruiter
+                                        </Button>
+                                    )}
                                     {app.status === 'Pending AI' && (
                                         <Button
                                             size="sm"

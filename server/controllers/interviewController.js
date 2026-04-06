@@ -24,25 +24,29 @@ exports.getEligibleCandidates = async (req, res) => {
             .populate('candidate', 'name email profilePicture');
         console.log('[eligible-candidates] Step 2 - Found applications:', applications.length);
 
-        // Step 3: Deduplicate candidates (a candidate may have applied to multiple jobs)
-        const seen = new Set();
-        const uniqueCandidates = [];
+        // Step 3: Deduplicate candidates and collect their applied job IDs
+        const candidateMap = new Map();
 
         for (const app of applications) {
             // Guard against null/missing candidate refs
             if (!app.candidate || !app.candidate._id) continue;
 
             const candidateIdStr = app.candidate._id.toString();
-            if (!seen.has(candidateIdStr)) {
-                seen.add(candidateIdStr);
-                uniqueCandidates.push({
+            if (candidateMap.has(candidateIdStr)) {
+                // Add this job to the existing candidate's list
+                candidateMap.get(candidateIdStr).appliedJobIds.push(app.job.toString());
+            } else {
+                candidateMap.set(candidateIdStr, {
                     _id: app.candidate._id,
                     name: app.candidate.name,
                     email: app.candidate.email,
                     profilePicture: app.candidate.profilePicture || null,
+                    appliedJobIds: [app.job.toString()],
                 });
             }
         }
+
+        const uniqueCandidates = Array.from(candidateMap.values());
 
         console.log('[eligible-candidates] Step 3 - Unique candidates:', uniqueCandidates.length);
 
