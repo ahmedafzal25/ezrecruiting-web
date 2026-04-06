@@ -235,16 +235,16 @@ exports.updateProfile = async (req, res) => {
     // Double-Validate Experience dates
     if (experience && Array.isArray(experience)) {
       for (const exp of experience) {
-        if (exp.title || exp.company) {
-          if (!exp.startDate) {
+        if (exp.designation || exp.company) {
+          if (!exp.from) {
             return res.status(400).json({ message: 'Start date is required for all experience entries.' });
           }
-          const start = new Date(exp.startDate);
+          const start = new Date(exp.from);
           if (start > new Date()) {
             return res.status(400).json({ message: 'Start date cannot be in the future.' });
           }
-          if (exp.endDate) {
-            const end = new Date(exp.endDate);
+          if (exp.to) {
+            const end = new Date(exp.to);
             if (end < start) {
               return res.status(400).json({ message: 'End date cannot be before the start date.' });
             }

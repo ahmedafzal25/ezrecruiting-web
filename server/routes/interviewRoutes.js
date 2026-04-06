@@ -340,6 +340,93 @@ router.get('/my-messages', protect, async (req, res) => {
     }
 });
 
+// Get Conversations (grouped by contact with latest message + unread count)
+router.get('/conversations', protect, async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Get all messages involving this user (sent or received)
+        const messages = await Message.find({
+            $or: [{ senderId: userId }, { receiverId: userId }]
+        })
+            .populate('senderId', 'name role profilePicture')
+            .populate('receiverId', 'name role profilePicture')
+            .sort({ createdAt: -1 });
+
+        // Group by contact
+        const conversationMap = new Map();
+        for (const msg of messages) {
+            const contactId = msg.senderId._id.toString() === userId.toString()
+                ? msg.receiverId._id.toString()
+                : msg.senderId._id.toString();
+
+            if (!conversationMap.has(contactId)) {
+                const contact = msg.senderId._id.toString() === userId.toString()
+                    ? msg.receiverId
+                    : msg.senderId;
+
+                conversationMap.set(contactId, {
+                    contact,
+                    lastMessage: msg,
+                    unreadCount: 0
+                });
+            }
+
+            // Count unread messages FROM this contact
+            if (
+                msg.receiverId._id.toString() === userId.toString() &&
+                msg.senderId._id.toString() === contactId &&
+                !msg.isRead
+            ) {
+                conversationMap.get(contactId).unreadCount++;
+            }
+        }
+
+        const conversations = Array.from(conversationMap.values());
+        res.json(conversations);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Failed to fetch conversations' });
+    }
+});
+
+// Get full message history between current user and a specific user
+router.get('/messages/:userId', protect, async (req, res) => {
+    try {
+        const currentUserId = req.user._id;
+        const otherUserId = req.params.userId;
+
+        const messages = await Message.find({
+            $or: [
+                { senderId: currentUserId, receiverId: otherUserId },
+                { senderId: otherUserId, receiverId: currentUserId }
+            ]
+        })
+            .populate('senderId', 'name role profilePicture')
+            .populate('receiverId', 'name role profilePicture')
+            .sort({ createdAt: 1 }); // oldest first for chat view
+
+        res.json(messages);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Failed to fetch messages' });
+    }
+});
+
+// Mark all messages from a specific user as read
+router.put('/messages/read/:userId', protect, async (req, res) => {
+    try {
+        await Message.updateMany(
+            { senderId: req.params.userId, receiverId: req.user._id, isRead: false },
+            { isRead: true }
+        );
+        res.json({ message: 'Messages marked as read' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Failed to mark messages as read' });
+    }
+});
+
 
 // ============================
 // Proctor Log — Retrieve proctoring events (Recruiter / Admin)
@@ -686,6 +773,128 @@ router.post('/:id/complete', protect, async (req, res) => {
     } catch (err) {
         console.error('[Complete] ❌ Error completing interview:', err);
         res.status(500).json({ message: 'Failed to complete interview', error: err.message });
+    }
+});
+
+// ============================
+// Messaging Routes
+// ============================
+
+// GET /api/interviews/conversations — Get conversations grouped by contact
+router.get('/conversations', protect, async (req, res) => {
+    try {
+        const userId = req.user._id.toString();
+
+        // Find all messages involving this user
+        const messages = await Message.find({
+            $or: [{ senderId: userId }, { receiverId: userId }]
+        })
+        .sort({ createdAt: -1 })
+        .populate('senderId', 'name role profilePicture')
+        .populate('receiverId', 'name role profilePicture');
+
+        // Group by the other person
+        const conversationMap = {};
+        for (const msg of messages) {
+            const otherId = msg.senderId._id.toString() === userId
+                ? msg.receiverId._id.toString()
+                : msg.senderId._id.toString();
+
+            if (!conversationMap[otherId]) {
+                const otherUser = msg.senderId._id.toString() === userId
+                    ? msg.receiverId
+                    : msg.senderId;
+
+                conversationMap[otherId] = {
+                    contact: {
+                        _id: otherUser._id,
+                        name: otherUser.name,
+                        role: otherUser.role,
+                        profilePicture: otherUser.profilePicture,
+                    },
+                    lastMessage: {
+                        content: msg.content,
+                        createdAt: msg.createdAt,
+                        senderId: { _id: msg.senderId._id.toString() },
+                    },
+                    unreadCount: 0,
+                };
+            }
+
+            // Count unread messages from the other person
+            if (msg.senderId._id.toString() !== userId && !msg.isRead) {
+                conversationMap[otherId].unreadCount += 1;
+            }
+        }
+
+        const conversations = Object.values(conversationMap);
+        res.json(conversations);
+    } catch (err) {
+        console.error('[Conversations] Error:', err);
+        res.status(500).json({ message: 'Failed to load conversations' });
+    }
+});
+
+// GET /api/interviews/messages/:userId — Get full chat history with a user
+router.get('/messages/:userId', protect, async (req, res) => {
+    try {
+        const myId = req.user._id;
+        const otherId = req.params.userId;
+
+        const messages = await Message.find({
+            $or: [
+                { senderId: myId, receiverId: otherId },
+                { senderId: otherId, receiverId: myId },
+            ]
+        })
+        .sort({ createdAt: 1 })
+        .populate('senderId', 'name profilePicture')
+        .populate('receiverId', 'name');
+
+        res.json(messages);
+    } catch (err) {
+        console.error('[Messages] Error:', err);
+        res.status(500).json({ message: 'Failed to load messages' });
+    }
+});
+
+// PUT /api/interviews/messages/read/:userId — Mark all messages from userId as read
+router.put('/messages/read/:userId', protect, async (req, res) => {
+    try {
+        await Message.updateMany(
+            { senderId: req.params.userId, receiverId: req.user._id, isRead: false },
+            { $set: { isRead: true } }
+        );
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[MarkRead] Error:', err);
+        res.status(500).json({ message: 'Failed to mark messages as read' });
+    }
+});
+
+// POST /api/interviews/message — Send a new message
+router.post('/message', protect, async (req, res) => {
+    try {
+        const { receiverId, content } = req.body;
+
+        if (!receiverId || !content?.trim()) {
+            return res.status(400).json({ message: 'receiverId and content are required' });
+        }
+
+        const message = await Message.create({
+            senderId: req.user._id,
+            receiverId,
+            content: content.trim(),
+        });
+
+        const populated = await Message.findById(message._id)
+            .populate('senderId', 'name profilePicture')
+            .populate('receiverId', 'name');
+
+        res.status(201).json(populated);
+    } catch (err) {
+        console.error('[SendMessage] Error:', err);
+        res.status(500).json({ message: 'Failed to send message' });
     }
 });
 

@@ -329,10 +329,11 @@ export const CandidateProfile: React.FC = () => {
                     firstName: user.firstName || user.name.split(' ')[0] || '',
                     lastName: user.lastName || user.name.split(' ').slice(1).join(' ') || '',
                     headline: profileData.headline || '',
-                    bio: profileData.bio || '',
-                    skills: profileData.skills ? profileData.skills.join(', ') : ''
+                    bio: profileData.bio || user.bio || '',
+                    skills: profileData.skills?.length ? profileData.skills.join(', ') : (user.skills?.join(', ') || '')
                 });
-                setExperience(profileData.experience || []);
+                // Fallback to reading from the main user object if the profile sub-document is empty
+                setExperience(profileData.experience?.length ? profileData.experience : (user.experience || []));
                 setEducation(profileData.education || []);
                 setProfilePicture(user.profilePicture || null);
                 if (user.resumeUrl || profileData.resume) {
@@ -358,6 +359,15 @@ export const CandidateProfile: React.FC = () => {
         const fromDate = new Date(newExp.from);
         const toDate = newExp.to ? new Date(newExp.to) : null;
         const today = new Date();
+
+        if (fromDate.getFullYear() < 1950 || fromDate.getFullYear() > 2100) {
+            alert("Start year must be between 1950 and 2100.");
+            return;
+        }
+        if (toDate && (toDate.getFullYear() < 1950 || toDate.getFullYear() > 2100)) {
+            alert("End year must be between 1950 and 2100.");
+            return;
+        }
 
         if (fromDate > today) {
             alert("Start date cannot be in the future.");
@@ -393,6 +403,15 @@ export const CandidateProfile: React.FC = () => {
         const fromDate = new Date(newEdu.from);
         const toDate = newEdu.to ? new Date(newEdu.to) : null;
         const today = new Date();
+
+        if (fromDate.getFullYear() < 1950 || fromDate.getFullYear() > 2100) {
+            alert("Start year must be between 1950 and 2100.");
+            return;
+        }
+        if (toDate && (toDate.getFullYear() < 1950 || toDate.getFullYear() > 2100)) {
+            alert("End year must be between 1950 and 2100.");
+            return;
+        }
 
         if (fromDate > today) {
             alert("Start date cannot be in the future.");
@@ -707,7 +726,18 @@ export const CandidateApplications: React.FC = () => {
                             <p className="text-[#7B2CBF] text-sm mb-4">{app.job?.company || 'Unknown Company'} • {app.job?.location || 'Remote'}</p>
                             <div className="mt-auto pt-4 border-t border-neutral-800 flex justify-between items-center">
                                 <span className="text-xs text-neutral-500">Applied: {new Date(app.appliedAt).toLocaleDateString()}</span>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    {app.job?.postedBy && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="px-3 py-1 text-xs border-neutral-700 text-neutral-300 hover:text-white hover:border-[#7B2CBF]"
+                                            onClick={() => window.location.href = `#/candidate/messages?userId=${app.job.postedBy._id}`}
+                                        >
+                                            <MessageSquare size={12} className="mr-1" />
+                                            Message Recruiter
+                                        </Button>
+                                    )}
                                     {app.status === 'Pending AI' && (
                                         <Button
                                             size="sm"

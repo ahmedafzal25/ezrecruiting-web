@@ -295,7 +295,11 @@ exports.getRankedCandidates = async (req, res) => {
 exports.getMyApplications = async (req, res) => {
     try {
         const applications = await Application.find({ candidate: req.user.id || req.user._id })
-            .populate('job', 'title company location type')
+            .populate({
+                path: 'job',
+                select: 'title company location type postedBy',
+                populate: { path: 'postedBy', select: 'name profilePicture role' }
+            })
             .sort({ appliedAt: -1 });
 
         res.json(applications);

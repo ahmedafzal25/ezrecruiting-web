@@ -190,6 +190,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
     { name: 'New Hirings', path: '/recruiter/new-hirings', icon: Award },
     { name: 'Past Jobs', path: '/recruiter/past-jobs', icon: Archive },
     { name: 'Schedule', path: '/recruiter/schedule', icon: Calendar },
+    { name: 'Messages', path: '/recruiter/messages', icon: Bell },
     { name: 'Profile', path: '/recruiter/profile', icon: User },
   ];
 
@@ -198,6 +199,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
     { name: 'Browse Jobs', path: '/candidate/jobs', icon: Briefcase },
     { name: 'My Applications', path: '/candidate/applications', icon: FileText },
     { name: 'Interviews', path: '/candidate/interviews', icon: MessageSquare },
+    { name: 'Messages', path: '/candidate/messages', icon: Bell },
     { name: 'My Profile', path: '/candidate/profile', icon: User },
   ];
 
@@ -207,6 +209,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ role }) => {
     { name: 'Delegated Projects', path: '/interviewer/projects', icon: Briefcase },
     { name: 'My Schedule', path: '/interviewer/schedule', icon: Calendar },
     { name: 'Requests', path: '/interviewer/requests', icon: MessageSquare },
+    { name: 'Messages', path: '/interviewer/messages', icon: Bell },
     { name: 'My Profile', path: '/interviewer/profile', icon: User },
   ];
 

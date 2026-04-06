@@ -460,7 +460,10 @@ export const Applicants: React.FC = () => {
                 application={selectedApp}
                 onStatusUpdate={handleStatusUpdate}
                 onSchedule={() => setIsScheduleOpen(true)}
-                onMessage={() => setIsMessageOpen(true)}
+                onMessage={() => {
+                    const candidateId = selectedApp?.candidate?._id;
+                    if (candidateId) window.location.href = `#/recruiter/messages?userId=${candidateId}`;
+                }}
             />
 
             {/* Schedule Interview Modal */}
@@ -1082,21 +1085,32 @@ export const ServiceMarketplace: React.FC = () => {
                             </div>
 
                             {/* Footer: price + CTA */}
-                            <div className="p-5 pt-0 flex items-center justify-between">
-                                <div>
-                                    <span className="text-2xl font-black text-white">${svc.price}</span>
-                                    <span className="text-xs text-neutral-500 ml-1">/ project</span>
+                            <div className="p-5 pt-0 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <span className="text-2xl font-black text-white">${svc.price}</span>
+                                        <span className="text-xs text-neutral-500 ml-1">/ project</span>
+                                    </div>
+                                    <Button
+                                        size="sm"
+                                        onClick={() => { 
+                                            setSelected(svc); 
+                                            setSelectedJobId('');
+                                        }}
+                                        className="bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] hover:from-[#9D4EDD] hover:to-[#7B2CBF] text-white"
+                                    >
+                                        <Send size={14} className="mr-1.5" />
+                                        Delegate Job
+                                    </Button>
                                 </div>
                                 <Button
                                     size="sm"
-                                    onClick={() => { 
-                                        setSelected(svc); 
-                                        setSelectedJobId('');
-                                    }}
-                                    className="bg-gradient-to-r from-[#7B2CBF] to-[#480CA8] hover:from-[#9D4EDD] hover:to-[#7B2CBF] text-white"
+                                    variant="outline"
+                                    className="w-full border-neutral-700 text-neutral-300 hover:text-white hover:border-[#7B2CBF]"
+                                    onClick={() => window.location.href = `#/recruiter/messages?userId=${svc.freelancerId._id}`}
                                 >
-                                    <Send size={14} className="mr-1.5" />
-                                    Delegate Job
+                                    <MessageSquare size={14} className="mr-1.5" />
+                                    Message Interviewer
                                 </Button>
                             </div>
                         </div>
@@ -1493,7 +1507,10 @@ export const CompletedDelegations: React.FC = () => {
                 application={selectedCandidate}
                 onStatusUpdate={() => {}}
                 onSchedule={() => {}}
-                onMessage={() => {}}
+                onMessage={() => {
+                    const candidateId = selectedCandidate?.candidate?._id;
+                    if (candidateId) window.location.href = `#/recruiter/messages?userId=${candidateId}`;
+                }}
             />
 
             {/* ── AI Report UI Modal ─────────────────── */}

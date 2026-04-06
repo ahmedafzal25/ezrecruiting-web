@@ -21,6 +21,142 @@ const MAX_QUESTIONS    = 999; // Practically infinite
 const EXEC_TIMEOUT_MS  = 5000; // Python execution timeout (ms)
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Output Normalization & Smart Comparison
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Normalizes an output string for reliable comparison:
+ *   1. Remove carriage returns (\r)
+ *   2. Trim leading/trailing whitespace
+ *   3. Collapse trailing newlines to nothing
+ *   4. Normalize internal multiple-blank-lines to single newline
+ */
+const normalizeOutput = (str) => {
+  if (str == null) return '';
+  return String(str)
+    .replace(/\r\n/g, '\n')   // CRLF → LF
+    .replace(/\r/g, '\n')     // stray CR → LF
+    .trim()                   // leading/trailing whitespace
+    .replace(/\n{2,}/g, '\n');// collapse empty lines
+};
+
+/**
+ * Smart comparison with type coercion:
+ *   - If both parse as finite numbers, compare numerically
+ *   - If both are boolean-like ("true"/"false"), compare as booleans
+ *   - If both parse as JSON arrays/objects, compare structurally
+ *   - Otherwise, compare normalized strings
+ */
+const smartCompare = (actual, expected) => {
+  const a = normalizeOutput(actual);
+  const e = normalizeOutput(expected);
+
+  // 1. Exact string match (fast path)
+  if (a === e) return true;
+
+  // 2. Numeric coercion: "5" vs 5, "3.14" vs 3.14, "6.0" vs "6"
+  const numA = Number(a);
+  const numE = Number(e);
+  if (a !== '' && e !== '' && isFinite(numA) && isFinite(numE)) {
+    // For floats, allow tiny epsilon for rounding (e.g., 78.53981... vs 78.54)
+    if (numA === numE) return true;
+    if (Math.abs(numA - numE) < 0.01) return true;
+  }
+
+  // 3. Boolean coercion: Python "True"/"False" vs JS "true"/"false" (case-insensitive)
+  const boolMap = { 'true': true, 'false': false };
+  const boolA = boolMap[a.toLowerCase()];
+  const boolE = boolMap[e.toLowerCase()];
+  if (boolA !== undefined && boolE !== undefined && boolA === boolE) {
+    return true;
+  }
+
+  // 4. Python None equivalence: "None" matches "null", "None", "none"
+  if (a.toLowerCase() === 'none' && e.toLowerCase() === 'none') return true;
+  if ((a.toLowerCase() === 'none' && e.toLowerCase() === 'null') ||
+      (a.toLowerCase() === 'null' && e.toLowerCase() === 'none')) return true;
+
+  // 5. Python collection normalization → JSON structural comparison
+  //    Handles: (1,2,3) → [1,2,3], {1,2,3} → [1,2,3], [1, 2, 3] vs [1,2,3]
+  //    Also handles Python True/False/None inside collections
+  try {
+    const pythonToJson = (s) => {
+      return s
+        .replace(/\(/g, '[').replace(/\)/g, ']')   // tuples → arrays
+        .replace(/'/g, '"')                          // single quotes → double quotes
+        .replace(/\bTrue\b/g, 'true')               // Python True → JSON true
+        .replace(/\bFalse\b/g, 'false')             // Python False → JSON false
+        .replace(/\bNone\b/g, 'null');               // Python None → JSON null
+    };
+    const jsonA = JSON.parse(pythonToJson(a));
+    const jsonE = JSON.parse(pythonToJson(e));
+    if (JSON.stringify(jsonA) === JSON.stringify(jsonE)) return true;
+  } catch (_) { /* not parseable — skip */ }
+
+  // 6. Multi-line: compare line-by-line, smart-comparing each line pair
+  //    This handles mixed output like "True\n5\n[1,2]"
+  if (a.includes('\n') || e.includes('\n')) {
+    const linesA = a.split('\n').map(l => l.trimEnd());
+    const linesE = e.split('\n').map(l => l.trimEnd());
+    if (linesA.length === linesE.length) {
+      const allMatch = linesA.every((lineA, i) => {
+        const lineE = linesE[i];
+        if (lineA === lineE) return true;
+        // Recurse smart comparison on each line (without the multi-line check)
+        // — handles "6.0" vs "6" on one line, "True" vs "true" on another
+        const nA = Number(lineA);
+        const nE = Number(lineE);
+        if (lineA !== '' && lineE !== '' && isFinite(nA) && isFinite(nE)) {
+          if (nA === nE || Math.abs(nA - nE) < 0.01) return true;
+        }
+        const bA = boolMap[lineA.toLowerCase()];
+        const bE = boolMap[lineE.toLowerCase()];
+        if (bA !== undefined && bE !== undefined && bA === bE) return true;
+        return false;
+      });
+      if (allMatch) return true;
+    }
+  }
+
+  return false;
+};
+
+/**
+ * Diff-log helper: makes invisible characters visible for terminal debugging.
+ * Wraps output in angle-brackets and escapes \n, \r, \t.
+ */
+const makeVisible = (str) => {
+  return String(str)
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t');
+};
+
+const diffLog = (caseLabel, expected, actual, isMatch) => {
+  if (isMatch) {
+    console.log(`[CodingTest]   [${caseLabel}] ✅ PASS`);
+  } else {
+    console.log(`[CodingTest]   ┌─ [${caseLabel}] ❌ FAIL`);
+    console.log(`[CodingTest]   │ Expected: <"${makeVisible(expected)}">`);
+    console.log(`[CodingTest]   │ Actual  : <"${makeVisible(actual)}">`);
+    // Show character-level length difference
+    const eTrimmed = normalizeOutput(expected);
+    const aTrimmed = normalizeOutput(actual);
+    if (eTrimmed.length !== aTrimmed.length) {
+      console.log(`[CodingTest]   │ Length  : expected ${eTrimmed.length} chars, got ${aTrimmed.length} chars`);
+    }
+    // Find first differing character position
+    for (let i = 0; i < Math.max(eTrimmed.length, aTrimmed.length); i++) {
+      if (eTrimmed[i] !== aTrimmed[i]) {
+        console.log(`[CodingTest]   │ Diff @${i}: expected char ${eTrimmed.charCodeAt(i) || 'EOF'} got ${aTrimmed.charCodeAt(i) || 'EOF'}`);
+        break;
+      }
+    }
+    console.log(`[CodingTest]   └─────────────────────────────────────`);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Sandbox Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -48,7 +184,7 @@ const classifyError = (errText = '') => {
  */
 const runOneCase = (tmpFile, input, expectedOutput) => {
   try {
-    const actualOutput = execSync(
+    const rawOutput = execSync(
       `python "${tmpFile}"`,
       {
         input:    input || '',
@@ -56,9 +192,10 @@ const runOneCase = (tmpFile, input, expectedOutput) => {
         encoding: 'utf8',
         stdio:    ['pipe', 'pipe', 'pipe'],
       },
-    ).trim();
+    );
 
-    const isMatch = actualOutput.trim() === expectedOutput.trim();
+    const actualOutput = normalizeOutput(rawOutput);
+    const isMatch = smartCompare(actualOutput, expectedOutput);
 
     return {
       passed:      isMatch,
@@ -69,7 +206,7 @@ const runOneCase = (tmpFile, input, expectedOutput) => {
     const errText = (err.stderr || '') + (err.message || '');
     return {
       passed:      false,
-      actualOutput: (err.stderr || err.message || 'Execution error').trimEnd(),
+      actualOutput: normalizeOutput(err.stderr || err.message || 'Execution error'),
       errorType:   classifyError(errText),
     };
   }
@@ -121,8 +258,8 @@ const runAllTestCases = (code, testCases) => {
 };
 
 /**
- * Asynchronous wrapper to execute Python code for a single input
- * (Used for the new dynamic scoring continuous loop)
+ * Asynchronous wrapper to execute Python code for a single input.
+ * Returns { stdout, stderr, errorType } for rich error reporting.
  */
 const executePython = (code, input) => {
   return new Promise((resolve) => {
@@ -132,15 +269,21 @@ const executePython = (code, input) => {
     );
     try {
       fs.writeFileSync(tmpFile, code, 'utf8');
-      const actualOutput = execSync(`python "${tmpFile}"`, {
+      const rawOutput = execSync(`python "${tmpFile}"`, {
         input: input || '',
         timeout: EXEC_TIMEOUT_MS,
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-      resolve(actualOutput);
+      resolve({ stdout: rawOutput, stderr: '', errorType: null });
     } catch (err) {
-      resolve((err.stderr || err.message || '').trimEnd());
+      const stderr = (err.stderr || '').trimEnd();
+      const errText = stderr + (err.message || '');
+      resolve({
+        stdout: err.stdout || '',
+        stderr: stderr || err.message || 'Execution error',
+        errorType: classifyError(errText),
+      });
     } finally {
       try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
     }
@@ -525,28 +668,32 @@ const submitAnswer = async (req, res) => {
         const isVisible = currentIndex < question.visibleTestCases.length;
         const caseLabel = isVisible ? `visible[${currentIndex}]` : `hidden[${currentIndex - question.visibleTestCases.length}]`;
 
-        let output;
+        let execResult;
 
         if (useFunctionMode) {
             // MODE A: Function-call — append print(fn(args)) and run with no stdin
             const functionCall = `print(${question.functionName}(${tc.input}))`;
             const executableCode = `${submittedCode}\n\n${functionCall}`;
-            console.log(`[CodingTest]   [${caseLabel}] MODE-A: Running → print(${question.functionName}(${tc.input.substring(0, 80)}))`);
-            output = await executePython(executableCode, '');
+            console.log(`[CodingTest]   [${caseLabel}] MODE-A: Running → print(${question.functionName}(${(tc.input || '').substring(0, 80)}))`);
+            execResult = await executePython(executableCode, '');
         } else {
             // MODE B: Stdin — run the submitted code as-is, providing tc.input via stdin
             console.log(`[CodingTest]   [${caseLabel}] MODE-B: Running with stdin → "${(tc.input || '').substring(0, 80)}"`);
-            output = await executePython(submittedCode, tc.input || '');
+            execResult = await executePython(submittedCode, tc.input || '');
         }
 
-        const actualTrimmed = (output || '').trim();
-        const expectedTrimmed = (tc.expectedOutput || '').trim();
-        const isMatch = actualTrimmed === expectedTrimmed;
+        // Normalize both sides with the robust normalizer
+        const actualNorm = normalizeOutput(execResult.stdout);
+        const expectedNorm = normalizeOutput(tc.expectedOutput);
 
-        console.log(`[CodingTest]   [${caseLabel}] Expected: "${expectedTrimmed.substring(0, 120)}"`);
-        console.log(`[CodingTest]   [${caseLabel}] Actual  : "${actualTrimmed.substring(0, 120)}"`);
-        console.log(`[CodingTest]   [${caseLabel}] Match   : ${isMatch ? '✅ PASS' : '❌ FAIL'}`);
-        
+        // Use smart comparison (handles type coercion, whitespace, JSON, etc.)
+        const isMatch = execResult.errorType
+            ? false  // If there was an execution error, it's an automatic fail
+            : smartCompare(actualNorm, expectedNorm);
+
+        // Detailed diff log to terminal (makes invisible chars visible)
+        diffLog(caseLabel, tc.expectedOutput, execResult.errorType ? execResult.stderr : execResult.stdout, isMatch);
+
         if (isMatch) {
             passedCases++;
             if (!isVisible) hiddenPassed++;
@@ -556,9 +703,9 @@ const submitAnswer = async (req, res) => {
              visibleResultsForClient.push({
                 input: tc.input,
                 expectedOutput: tc.expectedOutput,
-                actualOutput: actualTrimmed,
+                actualOutput: execResult.errorType ? execResult.stderr : actualNorm,
                 passed: isMatch,
-                errorType: isMatch ? null : classifyError(output),
+                errorType: execResult.errorType,
             });
         }
         currentIndex++;

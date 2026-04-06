@@ -71,36 +71,51 @@ router.put('/profile', verifyToken, async (req, res) => {
         // Trust & Verification layer array updates directly on User model
         if (experience !== undefined) userUpdate.experience = experience;
         if (projects !== undefined) userUpdate.projects = projects;
+        
+        // Ensure bio and skills sync to User model too for cross-compatibility
+        if (bio !== undefined) userUpdate.bio = bio;
+        if (skills !== undefined) userUpdate.skills = skills;
 
         const user = await User.findByIdAndUpdate(
             req.user.id,
             { $set: userUpdate },
-            { new: true }
+            { new: true, runValidators: false }
         ).select('-password').populate('profile');
 
-        // 2. Update Profile Fields (if user has a profile)
-        if (user.profile) {
-            const profileUpdate = {};
-            if (headline !== undefined) profileUpdate.headline = headline;
-            if (bio !== undefined) profileUpdate.bio = bio;
-            if (skills !== undefined) profileUpdate.skills = skills;
-            if (education !== undefined) profileUpdate.education = education;
-            if (resume !== undefined) profileUpdate.resume = resume;
+        // 2. Update Profile Fields (auto-create if missing)
+        const Profile = require('../models/Profile'); // Lazy load
+        let profileId = user.profile ? user.profile._id : null;
 
-            if (hourlyRate !== undefined) profileUpdate.hourlyRate = hourlyRate;
-            if (yearsOfExperience !== undefined) profileUpdate.yearsOfExperience = yearsOfExperience;
-            if (availability !== undefined) profileUpdate.availability = availability;
-
-            const Profile = require('../models/Profile'); // Lazy load to avoid circular dependency issues if any
-            const updatedProfile = await Profile.findByIdAndUpdate(
-                user.profile._id,
-                { $set: profileUpdate },
-                { new: true }
-            );
-
-            // Re-assign updated profile to user object for response
-            user.profile = updatedProfile;
+        if (!profileId) {
+            // Auto-create missing profile to prevent silent drops
+            const newProfile = new Profile({ user: user._id });
+            await newProfile.save();
+            profileId = newProfile._id;
+            
+            // Link it back to the User object
+            await User.findByIdAndUpdate(user._id, { $set: { profile: profileId } }, { runValidators: false });
         }
+
+        const profileUpdate = {};
+        if (headline !== undefined) profileUpdate.headline = headline;
+        if (bio !== undefined) profileUpdate.bio = bio;
+        if (skills !== undefined) profileUpdate.skills = skills;
+        if (experience !== undefined) profileUpdate.experience = experience; // Sync experience to Profile model
+        if (education !== undefined) profileUpdate.education = education;
+        if (resume !== undefined) profileUpdate.resume = resume;
+
+        if (hourlyRate !== undefined) profileUpdate.hourlyRate = hourlyRate;
+        if (yearsOfExperience !== undefined) profileUpdate.yearsOfExperience = yearsOfExperience;
+        if (availability !== undefined) profileUpdate.availability = availability;
+
+        const updatedProfile = await Profile.findByIdAndUpdate(
+            profileId,
+            { $set: profileUpdate },
+            { new: true, runValidators: false } // Added runValidators: false here just in case
+        );
+
+        // Re-assign updated profile to user object for response
+        user.profile = updatedProfile;
 
         // 3. Update Organization Fields (if user is Admin)
         if (user.role === 'ADMIN' && user.organization) {
@@ -112,8 +127,10 @@ router.put('/profile', verifyToken, async (req, res) => {
             await Organization.findByIdAndUpdate(user.organization, { $set: orgUpdate });
         }
 
+        require('fs').appendFileSync('debug_profile_save.log', `[${new Date().toISOString()}] Profile saved successfully: ${JSON.stringify(userUpdate)}\n`);
         res.json(user);
     } catch (error) {
+        require('fs').appendFileSync('debug_profile_save.log', `[${new Date().toISOString()}] ERROR: ${error.stack}\n`);
         console.error(error);
         res.status(500).json({ message: 'Server Error' });
     }
@@ -197,6 +214,18 @@ router.get('/candidates', verifyToken, async (req, res) => {
 
         const candidates = await User.find({ role: 'CANDIDATE' }).select('name email profilePicture');
         res.json(candidates);
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
+// @route   GET /api/users/by-id/:id
+// @desc    Get public user info by ID (for messaging deep-link)
+router.get('/by-id/:id', verifyToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('name role profilePicture');
+        if (!user) return res.status(404).json({ message: 'User not found' });
+        res.json(user);
     } catch (error) {
         res.status(500).json({ message: 'Server Error' });
     }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Calendar, Clock, Video, Plus, Briefcase,
-    Search, X, Award, User, Loader2
+    Search, X, Award, User, Loader2, MessageSquare
 } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { Card, Button, Badge, Modal, Input } from './UI';
@@ -341,6 +341,22 @@ const InterviewsTab: React.FC<InterviewsTabProps> = ({ role }) => {
 
                                         {/* Right: actions */}
                                         <div className="flex gap-2 items-center flex-shrink-0">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="border-neutral-700 text-neutral-300 hover:text-white hover:border-[#7B2CBF]"
+                                                onClick={() => {
+                                                    const otherId = other?._id;
+                                                    if (!otherId) return;
+                                                    const basePath = role === 'RECRUITER' ? '/recruiter'
+                                                        : role === 'INTERVIEWER' ? '/interviewer'
+                                                        : '/candidate';
+                                                    window.location.href = `#${basePath}/messages?userId=${otherId}`;
+                                                }}
+                                            >
+                                                <MessageSquare size={14} className="mr-1" />
+                                                Message
+                                            </Button>
                                             {role === 'RECRUITER' && (
                                                 <Button
                                                     variant="outline"

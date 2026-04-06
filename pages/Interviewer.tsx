@@ -1153,7 +1153,10 @@ export const InterviewerApplicants: React.FC = () => {
                 application={selectedApp}
                 onStatusUpdate={handleStatusUpdate}
                 onSchedule={() => setIsScheduleOpen(true)}
-                onMessage={() => setIsMessageOpen(true)}
+                onMessage={() => {
+                    const candidateId = selectedApp?.candidate?._id;
+                    if (candidateId) window.location.href = `#/interviewer/messages?userId=${candidateId}`;
+                }}
                 onProposeHire={handleProposeHire}
             />
 
