@@ -10,12 +10,12 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       proxy: {
         '/api': {
-          target: 'http://localhost:5001',
+          target: 'https://ezrecruiting-web-server-production.up.railway.app/',
           changeOrigin: true,
           secure: false,
         },
         '/socket.io': {
-          target: 'http://localhost:5001',
+          target: 'https://ezrecruiting-web-server-production.up.railway.app/',
           changeOrigin: true,
           ws: true,
         },
