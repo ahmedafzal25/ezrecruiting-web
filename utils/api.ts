@@ -1,5 +1,5 @@
 
-export const API_URL = '/api';
+export const API_URL = 'https://ezrecruiting-web-server-production.up.railway.app/api';
 
 export const apiRequest = async (endpoint: string, method: string = 'GET', body?: any) => {
   const token = localStorage.getItem('token');
